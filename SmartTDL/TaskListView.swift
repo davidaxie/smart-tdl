@@ -23,9 +23,22 @@ struct TaskListView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .scrollDismissesKeyboard(.interactively)
         .animation(reduceMotion ? nil : Motion.settle, value: store.items)
         .searchable(text: $query, isPresented: $searchPresented, prompt: "Search tasks")
-        .overlay(alignment: .bottomTrailing) { floatingAdd }
+        #if os(iOS)
+        .toolbar {
+            ToolbarItem(placement: .bottomBar) {
+                Button {
+                    focusedDay = today
+                } label: {
+                    Label("New task", systemImage: "plus")
+                }
+                .tint(Color.accentInk)
+                .accessibilityLabel("Add task to Today")
+            }
+        }
+        #endif
         .onAppear {
             if store.openTasks(on: today).isEmpty && store.completedTasks(on: today).isEmpty {
                 focusedDay = today
@@ -99,25 +112,6 @@ struct TaskListView: View {
     private func filtered(_ items: [TodoItem]) -> [TodoItem] {
         guard !query.isEmpty else { return items }
         return items.filter { $0.title.localizedCaseInsensitiveContains(query) }
-    }
-
-    @ViewBuilder private var floatingAdd: some View {
-        #if os(iOS)
-        Button {
-            focusedDay = today
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(Color.bgCanvas)
-                .frame(width: 56, height: 56)
-                .background(Circle().fill(Color.accentInk))
-                .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
-        }
-        .padding(Space.xl)
-        .accessibilityLabel("Add task to Today")
-        #else
-        EmptyView()
-        #endif
     }
 
     private func drop(_ idString: String, to day: Date) {
@@ -349,35 +343,52 @@ struct MacListView: View {
     @State private var editingID: UUID?
     @State private var query = ""
     @State private var searchActive = false
+    /// Set by keyboard actions so the next selection change scrolls into view.
+    @State private var pendingScroll = false
 
     private var today: Date { Calendar.current.startOfDay(for: Date()) }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                greeting
-                if searchActive { searchField }
-                ForEach(store.visibleDays, id: \.self) { day in
-                    section(day)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    greeting
+                    if searchActive { searchField }
+                    ForEach(store.visibleDays, id: \.self) { day in
+                        section(day)
+                    }
+                    hintBar
                 }
-                hintBar
+                .frame(maxWidth: 660, alignment: .leading)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, Space.section)
+                .padding(.top, Space.s)
+                .padding(.bottom, 60)
             }
-            .frame(maxWidth: 660, alignment: .leading)
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, Space.section)
-            .padding(.top, Space.s)
-            .padding(.bottom, 60)
+            .scrollContentBackground(.hidden)
+            .animation(reduceMotion ? nil : Motion.settle, value: store.items)
+            .focusable()
+            .focusEffectDisabled()
+            .focused($listFocused)
+            .onKeyPress { press in handleKey(press) }
+            .onAppear { focusList() }
+            .onChange(of: store.newTaskToken) { _, _ in focusedDay = today }
+            .onChange(of: store.findToken) { _, _ in searchActive = true; searchFocused = true }
+            .onChange(of: store.refocusToken) { _, _ in focusList() }
+            // Keep the keyboard cursor (and the row being edited) on screen —
+            // but only when the move came from the keyboard, so launch and mouse
+            // clicks don't yank the greeting or a visible row out from under you.
+            .onChange(of: selectedID) { _, id in
+                if pendingScroll { pendingScroll = false; scrollTo(id, proxy) }
+            }
+            .onChange(of: editingID) { _, id in scrollTo(id, proxy) }
         }
-        .scrollContentBackground(.hidden)
-        .animation(reduceMotion ? nil : Motion.settle, value: store.items)
-        .focusable()
-        .focusEffectDisabled()
-        .focused($listFocused)
-        .onKeyPress { press in handleKey(press) }
-        .onAppear { focusList() }
-        .onChange(of: store.newTaskToken) { _, _ in focusedDay = today }
-        .onChange(of: store.findToken) { _, _ in searchActive = true; searchFocused = true }
-        .onChange(of: store.refocusToken) { _, _ in focusList() }
+    }
+
+    private func scrollTo(_ id: UUID?, _ proxy: ScrollViewProxy) {
+        guard let id else { return }
+        if reduceMotion { proxy.scrollTo(id, anchor: .center) }
+        else { withAnimation(Motion.settle) { proxy.scrollTo(id, anchor: .center) } }
     }
 
     @ViewBuilder
@@ -549,6 +560,7 @@ struct MacListView: View {
 
     private func move(_ delta: Int, _ order: [TodoItem]) {
         guard !order.isEmpty else { return }
+        pendingScroll = true
         if let id = selectedID, let idx = order.firstIndex(where: { $0.id == id }) {
             selectedID = order[max(0, min(order.count - 1, idx + delta))].id
         } else {
@@ -566,6 +578,7 @@ struct MacListView: View {
             if let idx = openOrder.firstIndex(where: { $0.id == id }), idx + 1 < openOrder.count {
                 let next = openOrder[idx + 1].id
                 store.toggle(it)
+                pendingScroll = true
                 selectedID = next
                 return
             }
@@ -579,6 +592,7 @@ struct MacListView: View {
         guard let id = selectedID, let it = store.item(id) else { return }
         if let idx = order.firstIndex(where: { $0.id == id }) {
             let nextIdx = idx + 1 < order.count ? idx + 1 : idx - 1
+            pendingScroll = true
             selectedID = (nextIdx >= 0 && nextIdx < order.count) ? order[nextIdx].id : nil
         }
         store.delete(it)
@@ -586,7 +600,11 @@ struct MacListView: View {
 
     private func selectedDay() -> Date? { selectedID.flatMap { store.item($0)?.day } }
     private func dayOffset(_ n: Int) -> Date { Calendar.current.date(byAdding: .day, value: n, to: today) ?? today }
-    private func deferSelected(to day: Date) { if let id = selectedID, let it = store.item(id) { store.move(it, to: day) } }
+    // Defer/nudge keep the same selection (the item just moves to another day),
+    // so we leave the viewport put — the task animates away while you keep going.
+    private func deferSelected(to day: Date) {
+        if let id = selectedID, let it = store.item(id) { store.move(it, to: day) }
+    }
 
     private func nudge(_ delta: Int) {
         guard let id = selectedID, let it = store.item(id),
