@@ -114,12 +114,26 @@ struct HaikuRanker: Ranker {
 enum Keychain {
     private static let service = "com.smarttdl.SmartTDL"
     private static let account = "anthropic-api-key"
+    private static let flagKey = "smarttdl.hasAPIKey"
 
+    /// Cheap, prompt-free check for whether the user has saved a key. Reading the
+    /// actual Keychain item can surface a system password prompt (especially when
+    /// the app's signature changes between builds), so callers gate on this first
+    /// and only touch the Keychain when a key is genuinely expected.
+    static var hasKey: Bool { UserDefaults.standard.bool(forKey: flagKey) }
+
+    /// The stored key. May prompt — only call when `hasKey` is true.
     static var apiKey: String? { read() }
 
     static func set(_ value: String?) {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let trimmed, !trimmed.isEmpty { write(trimmed) } else { remove() }
+        if let trimmed, !trimmed.isEmpty {
+            write(trimmed)
+            UserDefaults.standard.set(true, forKey: flagKey)
+        } else {
+            remove()
+            UserDefaults.standard.set(false, forKey: flagKey)
+        }
     }
 
     private static func read() -> String? {
@@ -143,6 +157,7 @@ enum Keychain {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
             kSecValueData as String: Data(value.utf8)
         ]
         SecItemAdd(query as CFDictionary, nil)

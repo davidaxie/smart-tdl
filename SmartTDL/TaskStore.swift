@@ -17,6 +17,8 @@ final class TaskStore {
     private(set) var findToken = 0
     private(set) var commandToken = 0
     private(set) var focusToken = 0
+    /// Bumped when a modal/overlay dismisses so the main list re-grabs key focus.
+    private(set) var refocusToken = 0
 
     private let saveURL: URL
     private let calendar = Calendar.current
@@ -37,6 +39,7 @@ final class TaskStore {
     func requestFind() { findToken &+= 1 }
     func requestCommandBar() { commandToken &+= 1 }
     func requestFocusMode() { focusToken &+= 1 }
+    func requestListRefocus() { refocusToken &+= 1 }
 
     func item(_ id: UUID) -> TodoItem? { items.first { $0.id == id } }
 
@@ -241,13 +244,26 @@ final class TaskStore {
         if changed { save() }
     }
 
+    /// Resolve which ranker to use. The Keychain read can surface a blocking
+    /// system prompt, so it runs off the main thread — never stalling launch or
+    /// the first frame. Defaults to the local heuristic until the key resolves.
     func refreshRanker() {
-        if let key = Keychain.apiKey, !key.isEmpty {
-            ranker = HaikuRanker(apiKey: key)
-        } else {
+        // No key configured → never touch the Keychain (no system prompt).
+        guard Keychain.hasKey else {
             ranker = HeuristicRanker()
+            scheduleRank()
+            return
         }
-        scheduleRank()
+        Task { [weak self] in
+            let key = await Task.detached { Keychain.apiKey }.value
+            guard let self else { return }
+            if let key, !key.isEmpty {
+                self.ranker = HaikuRanker(apiKey: key)
+            } else {
+                self.ranker = HeuristicRanker()
+            }
+            self.scheduleRank()
+        }
     }
 
     func scheduleRank() {

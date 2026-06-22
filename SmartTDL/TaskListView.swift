@@ -215,6 +215,9 @@ struct AddRow: View {
     @Environment(TaskStore.self) private var store
     let day: Date
     var focusBinding: FocusState<Date?>.Binding
+    /// Called when the user presses Escape in the field (Mac: hand focus back to
+    /// the keyboard-driven list).
+    var onEscape: (() -> Void)? = nil
 
     @State private var text = ""
 
@@ -235,6 +238,9 @@ struct AddRow: View {
                 .foregroundStyle(Color.inkBody)
                 .focused(focusBinding, equals: day)
                 .onSubmit(submit)
+                #if os(macOS)
+                .onExitCommand { focusBinding.wrappedValue = nil; onEscape?() }
+                #endif
         }
         .padding(.vertical, Space.s)
     }
@@ -371,6 +377,7 @@ struct MacListView: View {
         .onAppear { focusList() }
         .onChange(of: store.newTaskToken) { _, _ in focusedDay = today }
         .onChange(of: store.findToken) { _, _ in searchActive = true; searchFocused = true }
+        .onChange(of: store.refocusToken) { _, _ in focusList() }
     }
 
     @ViewBuilder
@@ -391,7 +398,7 @@ struct MacListView: View {
             }
 
             if !searching {
-                AddRow(day: day, focusBinding: $focusedDay)
+                AddRow(day: day, focusBinding: $focusedDay, onEscape: { focusList() })
             }
 
             if !done.isEmpty {
@@ -462,6 +469,7 @@ struct MacListView: View {
         .padding(.horizontal, Space.m).padding(.vertical, Space.s)
         .background(Capsule().fill(Color.inkPrimary.opacity(0.05)))
         .padding(.bottom, Space.m)
+        .onAppear { searchFocused = true }
         .onExitCommand(perform: closeSearch)
     }
 
@@ -548,7 +556,22 @@ struct MacListView: View {
         }
     }
 
-    private func complete() { if let id = selectedID, let it = store.item(id) { store.toggle(it) } }
+    private func complete() {
+        guard let id = selectedID, let it = store.item(id) else { return }
+        // When checking a task off, march the cursor down to the next open task
+        // (computed before the toggle reshuffles it into the completed pool), so
+        // space-space-space sweeps the list instead of stranding the cursor.
+        if !it.isCompleted {
+            let openOrder = store.visibleDays.flatMap { filtered(store.openTasks(on: $0)) }
+            if let idx = openOrder.firstIndex(where: { $0.id == id }), idx + 1 < openOrder.count {
+                let next = openOrder[idx + 1].id
+                store.toggle(it)
+                selectedID = next
+                return
+            }
+        }
+        store.toggle(it)
+    }
     private func beginEdit() { if selectedID != nil { editingID = selectedID } }
     private func pinSelected() { if let id = selectedID, let it = store.item(id) { store.togglePin(it) } }
 
@@ -587,6 +610,7 @@ private struct MacRow: View {
 
     @State private var text: String
     @State private var hovering = false
+    @State private var didCommit = false
     @FocusState private var fieldFocused: Bool
 
     init(item: TodoItem, isFocus: Bool, isSelected: Bool, isEditing: Bool, moveTargets: [Date],
@@ -667,7 +691,7 @@ private struct MacRow: View {
         .draggable(item.id.uuidString)
         .contextMenu { contextMenu }
         .onChange(of: isEditing) { _, editing in
-            if editing { text = item.title; fieldFocused = true }
+            if editing { text = item.title; fieldFocused = true; didCommit = false }
         }
         .onChange(of: item.title) { _, t in if !isEditing { text = t } }
         .onChange(of: fieldFocused) { _, focused in
@@ -708,6 +732,8 @@ private struct MacRow: View {
     }
 
     private func commit() {
+        guard !didCommit else { return }   // Return + blur can both fire; commit once.
+        didCommit = true
         if text != item.title { store.rename(item, to: text) }
         onEndEdit()
     }
@@ -763,6 +789,7 @@ struct CommandBarView: View {
             .padding(.top, 110)
         }
         .onAppear { focused = true }
+        .onDisappear { store.requestListRefocus() }
         .onExitCommand { isPresented = false }
     }
 
@@ -841,6 +868,7 @@ struct FocusModeView: View {
         .focusEffectDisabled()
         .focused($focused)
         .onAppear { focused = true }
+        .onDisappear { store.requestListRefocus() }
         .onKeyPress { press in
             switch press.key {
             case .return, .space:

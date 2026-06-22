@@ -16,6 +16,9 @@ struct ContentView: View {
             .sheet(isPresented: $showSettings) {
                 SettingsView().environment(store)
             }
+            .onChange(of: showSettings) { _, shown in
+                if !shown { store.requestListRefocus() }
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { store.commitPendingRank() }
             }
