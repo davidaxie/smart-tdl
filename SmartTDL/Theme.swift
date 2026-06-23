@@ -166,6 +166,17 @@ enum Gravity {
         default: return (14, .inkSecondary)
         }
     }
+
+    /// Week-board columns: a tighter ramp (columns are narrow), same single
+    /// channel so each day's top task is visibly the heaviest.
+    static func column(rank: Int) -> (size: CGFloat, color: Color) {
+        switch rank {
+        case 0: return (16.5, .inkPrimary)
+        case 1: return (14.5, .inkBody)
+        case 2: return (14, .inkBody)
+        default: return (13, .inkSecondary)
+        }
+    }
 }
 
 // MARK: - Date helpers

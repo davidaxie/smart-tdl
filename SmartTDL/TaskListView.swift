@@ -1154,22 +1154,24 @@ struct CaptureMenuView: View {
     }
 }
 
-// MARK: - Mac week-columns layout (optional, the "plan my week" view)
+// MARK: - Mac week-columns layout ("plan my week" — same gravity intelligence)
 
 struct WeekBoardView: View {
     @Environment(TaskStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focusedDay: Date?
+    @State private var editingID: UUID?
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: Space.xxl) {
+            HStack(alignment: .top, spacing: Space.l) {
                 ForEach(store.visibleDays, id: \.self) { day in
-                    DayColumn(day: day, focusBinding: $focusedDay)
-                        .frame(width: 250)
+                    DayColumn(day: day, focusBinding: $focusedDay, editingID: $editingID)
+                        .frame(width: 248)
                 }
             }
             .padding(.horizontal, Space.xl)
+            .padding(.top, 44)        // clear the floating traffic lights + controls
             .padding(.bottom, Space.l)
             .frame(maxHeight: .infinity, alignment: .top)
         }
@@ -1185,6 +1187,7 @@ private struct DayColumn: View {
     @Environment(TaskStore.self) private var store
     let day: Date
     var focusBinding: FocusState<Date?>.Binding
+    @Binding var editingID: UUID?
 
     var body: some View {
         let open = store.openTasks(on: day)
@@ -1192,20 +1195,35 @@ private struct DayColumn: View {
         let isToday = Calendar.current.isDateInToday(day)
 
         VStack(alignment: .leading, spacing: 0) {
-            DayMasthead(day: day, onActivate: { focusBinding.wrappedValue = day })
+            ColumnMasthead(day: day, isToday: isToday)
+                .padding(.bottom, Space.s)
+
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: Space.xs) {
-                    ForEach(open) { item in ColumnRow(item: item) }
+                VStack(alignment: .leading, spacing: 1) {
+                    if isToday, !open.isEmpty {
+                        Text("NOW")
+                            .font(.system(size: 10, weight: .semibold)).tracking(3)
+                            .foregroundStyle(Color.accentInk)
+                            .padding(.leading, Space.s)
+                            .padding(.bottom, 2)
+                    }
+
+                    ForEach(Array(open.enumerated()), id: \.element.id) { idx, item in
+                        weekRow(item, rank: idx)
+                    }
 
                     if open.isEmpty && done.isEmpty && isToday {
-                        EmptyLine()
+                        Text("A clear day.")
+                            .font(.system(.subheadline, design: .serif))
+                            .foregroundStyle(Color.inkTertiary)
+                            .padding(.vertical, Space.s).padding(.leading, Space.s)
                     }
 
                     AddRow(day: day, focusBinding: focusBinding)
 
                     if !done.isEmpty {
-                        PoolDivider()
-                        ForEach(done) { item in ColumnRow(item: item) }
+                        CompletedTrayHeader(count: done.count)
+                        ForEach(done) { item in weekRow(item, rank: 0) }
                     }
                 }
                 .padding(.bottom, Space.l)
@@ -1219,25 +1237,40 @@ private struct DayColumn: View {
             return true
         }
     }
+
+    private func weekRow(_ item: TodoItem, rank: Int) -> some View {
+        let g = Gravity.column(rank: rank)
+        return MacRow(item: item,
+                      kind: .body(size: g.size, color: g.color),
+                      isSelected: false,
+                      isEditing: item.id == editingID,
+                      moveTargets: store.visibleDays,
+                      onSelect: { },
+                      onBeginEdit: { editingID = item.id },
+                      onEndEdit: { editingID = nil })
+    }
 }
 
-private struct ColumnRow: View {
-    @Environment(TaskStore.self) private var store
-    let item: TodoItem
+/// Compact per-column day header. Today is marked with the accent dot.
+private struct ColumnMasthead: View {
+    let day: Date
+    let isToday: Bool
 
     var body: some View {
-        TaskRowView(
-            item: item,
-            isFocus: false,
-            onToggle: { store.toggle(item) },
-            onSubmit: { store.rename(item, to: $0) },
-            onDelete: { store.delete(item) },
-            onPin: { store.togglePin(item) },
-            onInteract: { store.setInteracting(item.id, $0) },
-            onMove: { store.move(item, to: $0) },
-            moveTargets: store.visibleDays
-        )
-        .background(item.isCompleted ? Color.surfacePool : Color.clear)
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if isToday {
+                Circle().fill(Color.accentInk).frame(width: 6, height: 6)
+            }
+            Text(day.dayLabel)
+                .font(.display(18, relativeTo: .title3))
+                .foregroundStyle(isToday ? Color.inkPrimary : Color.inkSecondary)
+            Text(day.daySubLabel)
+                .font(.system(.caption2, design: .serif))
+                .foregroundStyle(Color.inkTertiary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Space.s)
+        .contentShape(Rectangle())
     }
 }
 #endif
