@@ -172,6 +172,21 @@ struct EmptyLine: View {
     }
 }
 
+/// Peak-end payoff: shown once the day's open tasks are all cleared.
+struct AllClearLine: View {
+    var body: some View {
+        HStack(spacing: Space.s) {
+            Image(systemName: "checkmark")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.accentInk)
+            Text("All clear for today.")
+                .font(.display(22, relativeTo: .title3))
+                .foregroundStyle(Color.inkSecondary)
+        }
+        .padding(.vertical, Space.m)
+    }
+}
+
 struct PoolDivider: View {
     var body: some View {
         Rectangle()
@@ -530,6 +545,10 @@ struct MacListView: View {
 
                 if open.isEmpty && done.isEmpty && isToday && !searching {
                     EmptyLine()
+                }
+
+                if open.isEmpty && !done.isEmpty && isToday && !searching {
+                    AllClearLine()   // peak-end: the day is cleared
                 }
 
                 if !searching {
