@@ -483,38 +483,63 @@ struct MacListView: View {
     private var today: Date { Calendar.current.startOfDay(for: Date()) }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if searchActive { searchField }
-                    ForEach(store.visibleDays, id: \.self) { day in
-                        section(day)
+        GeometryReader { geo in
+            let showRail = geo.size.width >= 860
+            ScrollViewReader { proxy in
+                HStack(alignment: .top, spacing: 0) {
+                    mainList(proxy)
+                        .frame(maxWidth: .infinity)
+                    if showRail {
+                        railScroll.frame(width: 300)
                     }
                 }
-                .frame(maxWidth: 620, alignment: .leading)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, Space.section)
-                .padding(.top, 34)
-                .padding(.bottom, 90)
             }
-            .scrollContentBackground(.hidden)
-            .animation(reduceMotion ? nil : Motion.settle, value: store.items)
-            .focusable()
-            .focusEffectDisabled()
-            .focused($listFocused)
-            .onKeyPress { press in handleKey(press) }
-            .onAppear { focusList() }
-            .onChange(of: store.newTaskToken) { _, _ in focusedDay = today }
-            .onChange(of: store.findToken) { _, _ in searchActive = true; searchFocused = true }
-            .onChange(of: store.refocusToken) { _, _ in focusList() }
-            // Keep the keyboard cursor (and the row being edited) on screen —
-            // but only when the move came from the keyboard, so launch and mouse
-            // clicks don't yank the greeting or a visible row out from under you.
-            .onChange(of: selectedID) { _, id in
-                if pendingScroll { pendingScroll = false; scrollTo(id, proxy) }
-            }
-            .onChange(of: editingID) { _, id in scrollTo(id, proxy) }
         }
+    }
+
+    private func mainList(_ proxy: ScrollViewProxy) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if searchActive { searchField }
+                ForEach(store.visibleDays, id: \.self) { day in
+                    section(day)
+                }
+            }
+            .frame(maxWidth: 600, alignment: .leading)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, Space.section)
+            .padding(.top, 34)
+            .padding(.bottom, 90)
+        }
+        .scrollContentBackground(.hidden)
+        .animation(reduceMotion ? nil : Motion.settle, value: store.items)
+        .focusable()
+        .focusEffectDisabled()
+        .focused($listFocused)
+        .onKeyPress { press in handleKey(press) }
+        .onAppear { focusList() }
+        .onChange(of: store.newTaskToken) { _, _ in focusedDay = today }
+        .onChange(of: store.findToken) { _, _ in searchActive = true; searchFocused = true }
+        .onChange(of: store.refocusToken) { _, _ in focusList() }
+        // Keep the keyboard cursor (and the row being edited) on screen — but only
+        // when the move came from the keyboard, so launch and mouse clicks don't
+        // yank a visible row to center.
+        .onChange(of: selectedID) { _, id in
+            if pendingScroll { pendingScroll = false; scrollTo(id, proxy) }
+        }
+        .onChange(of: editingID) { _, id in scrollTo(id, proxy) }
+    }
+
+    // The right rail: undated parking-lot lists that use the wide-screen space.
+    private var railScroll: some View {
+        ScrollView(showsIndicators: false) {
+            SideRail()
+                .padding(.top, 48)
+                .padding(.trailing, Space.xl)
+                .padding(.bottom, 90)
+        }
+        .scrollContentBackground(.hidden)
+        .animation(reduceMotion ? nil : Motion.settle, value: store.items)
     }
 
     private func scrollTo(_ id: UUID?, _ proxy: ScrollViewProxy) {
@@ -955,6 +980,119 @@ private struct MacRow: View {
         didCommit = true
         if text != item.title { store.rename(item, to: text) }
         onEndEdit()
+    }
+}
+
+// MARK: - Side rail (undated parking-lot lists)
+
+/// The wide-screen right rail: a stack of undated lists (Later / Misc /
+/// Reminders) that sit outside the daily clock. Drag a day task onto a list to
+/// park it; drag a parked task onto a day to schedule it.
+private struct SideRail: View {
+    @State private var editingID: UUID?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.section) {
+            Text("Lists")
+                .font(.system(size: 11, weight: .semibold)).tracking(3)
+                .foregroundStyle(Color.inkTertiary)
+            ForEach(TaskStore.listNames, id: \.self) { name in
+                SideList(name: name, editingID: $editingID)
+            }
+        }
+    }
+}
+
+private struct SideList: View {
+    @Environment(TaskStore.self) private var store
+    let name: String
+    @Binding var editingID: UUID?
+
+    @State private var addText = ""
+    @FocusState private var adding: Bool
+    @State private var hovering = false
+
+    var body: some View {
+        let open = store.listTasks(name, completed: false)
+        let done = store.listTasks(name, completed: true)
+
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(name)
+                    .font(.display(19, relativeTo: .title3))
+                    .foregroundStyle(Color.inkSecondary)
+                Spacer(minLength: 0)
+                if !open.isEmpty {
+                    Text("\(open.count)")
+                        .font(.system(size: 12)).foregroundStyle(Color.inkTertiary)
+                }
+            }
+            .padding(.horizontal, Space.s)
+            .padding(.bottom, Space.xs)
+
+            ForEach(open) { item in row(item) }
+
+            SideAddRow(placeholder: "Add to \(name)", text: $addText, focus: $adding, onSubmit: submit)
+
+            if !done.isEmpty {
+                CompletedTrayHeader(count: done.count)
+                ForEach(done) { item in row(item) }
+            }
+        }
+        .padding(.vertical, Space.s)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(hovering ? Color.accentInk.opacity(0.04) : Color.clear)
+        )
+        .onHover { hovering = $0 }
+        .dropDestination(for: String.self) { ids, _ in
+            if let s = ids.first, let id = UUID(uuidString: s), let it = store.item(id) {
+                store.moveToList(it, list: name)
+            }
+            return true
+        }
+    }
+
+    private func submit() {
+        store.add(addText, toList: name)
+        addText = ""
+        adding = true
+    }
+
+    private func row(_ item: TodoItem) -> some View {
+        MacRow(item: item,
+               kind: .body(size: 14, color: .inkBody),
+               isSelected: false,
+               isEditing: item.id == editingID,
+               moveTargets: store.visibleDays,
+               onSelect: { },
+               onBeginEdit: { editingID = item.id },
+               onEndEdit: { editingID = nil })
+    }
+}
+
+private struct SideAddRow: View {
+    let placeholder: String
+    @Binding var text: String
+    var focus: FocusState<Bool>.Binding
+    var onSubmit: () -> Void
+
+    var body: some View {
+        HStack(spacing: Space.s) {
+            Image(systemName: "plus")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(focus.wrappedValue ? Color.accentInk : Color.placeholderInk)
+                .frame(width: 26, height: 26)
+            TextField(placeholder, text: $text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13.5))
+                .foregroundStyle(Color.inkBody)
+                .focused(focus)
+                .onSubmit(onSubmit)
+        }
+        .padding(.vertical, 3)
+        .contentShape(Rectangle())
+        .onTapGesture { focus.wrappedValue = true }
     }
 }
 

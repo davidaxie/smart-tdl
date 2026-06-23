@@ -59,7 +59,7 @@ final class TaskStore {
         let today = calendar.startOfDay(for: Date())
         guard let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) else { return }
         var changed = false
-        for i in items.indices where !items[i].isCompleted && calendar.isDate(items[i].day, inSameDayAs: today) {
+        for i in items.indices where items[i].list == nil && !items[i].isCompleted && calendar.isDate(items[i].day, inSameDayAs: today) {
             items[i].day = tomorrow
             changed = true
         }
@@ -88,13 +88,24 @@ final class TaskStore {
     }
 
     func openTasks(on day: Date) -> [TodoItem] {
-        items.filter { !$0.isCompleted && calendar.isDate($0.day, inSameDayAs: day) }
+        items.filter { $0.list == nil && !$0.isCompleted && calendar.isDate($0.day, inSameDayAs: day) }
             .sorted(by: Self.order)
     }
 
     func completedTasks(on day: Date) -> [TodoItem] {
-        items.filter { $0.isCompleted && calendar.isDate($0.day, inSameDayAs: day) }
+        items.filter { $0.list == nil && $0.isCompleted && calendar.isDate($0.day, inSameDayAs: day) }
             .sorted { $0.sortIndex < $1.sortIndex }
+    }
+
+    /// The fixed parking-lot lists shown in the desktop right rail.
+    static let listNames = ["Later", "Misc", "Reminders"]
+
+    func listTasks(_ name: String, completed: Bool) -> [TodoItem] {
+        items.filter { $0.list == name && $0.isCompleted == completed }
+            .sorted { a, b in
+                if a.isPinned != b.isPinned { return a.isPinned }
+                return a.sortIndex < b.sortIndex
+            }
     }
 
     /// The focus task = the top open task of Today.
@@ -128,11 +139,33 @@ final class TaskStore {
         let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
         let d = calendar.startOfDay(for: day)
-        let nextIndex = (items.filter { calendar.isDate($0.day, inSameDayAs: d) }
+        let nextIndex = (items.filter { $0.list == nil && calendar.isDate($0.day, inSameDayAs: d) }
             .map(\.sortIndex).max() ?? 0) + 1
         items.append(TodoItem(title: t, day: d, sortIndex: nextIndex, recurrence: recurrence))
         save()
         scheduleRank()
+        commitPendingRank()
+    }
+
+    /// Add a task to an undated parking-lot list (Later/Misc/…).
+    func add(_ title: String, toList list: String) {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        let nextIndex = (items.filter { $0.list == list }.map(\.sortIndex).max() ?? 0) + 1
+        let today = calendar.startOfDay(for: Date())
+        items.append(TodoItem(title: t, day: today, sortIndex: nextIndex, list: list))
+        save()
+    }
+
+    /// Park a task into a list (from a day), or re-file it between lists.
+    func moveToList(_ item: TodoItem, list: String) {
+        guard let i = items.firstIndex(where: { $0.id == item.id }) else { return }
+        pushUndo(.move(item.id, items[i].day))
+        items[i].list = list
+        items[i].importance = nil
+        let nextIndex = (items.filter { $0.list == list }.map(\.sortIndex).max() ?? 0) + 1
+        items[i].sortIndex = nextIndex
+        save()
         commitPendingRank()
     }
 
@@ -191,6 +224,7 @@ final class TaskStore {
         guard let i = items.firstIndex(where: { $0.id == item.id }) else { return }
         pushUndo(.move(item.id, items[i].day))
         items[i].day = calendar.startOfDay(for: day)
+        items[i].list = nil   // scheduling onto a day un-files it from any list
         save()
         scheduleRank()
         commitPendingRank()
@@ -225,7 +259,7 @@ final class TaskStore {
     private func rollForward() {
         let today = calendar.startOfDay(for: Date())
         var changed = false
-        for i in items.indices where !items[i].isCompleted && items[i].day < today {
+        for i in items.indices where items[i].list == nil && !items[i].isCompleted && items[i].day < today {
             items[i].day = today
             changed = true
         }
@@ -293,7 +327,7 @@ final class TaskStore {
 
     private func rerank() async {
         let visible = Set(visibleDays)
-        let toRank = items.filter { !$0.isCompleted && visible.contains($0.day) }
+        let toRank = items.filter { $0.list == nil && !$0.isCompleted && visible.contains($0.day) }
         guard !toRank.isEmpty else { return }
         guard let scores = try? await ranker.rank(toRank, context: context) else { return }
         pendingScores = scores
@@ -335,6 +369,9 @@ final class TaskStore {
         func mk(_ title: String, _ day: Date, _ i: Double, done: Bool = false) -> TodoItem {
             TodoItem(title: title, day: day, sortIndex: i, isCompleted: done)
         }
+        func list(_ title: String, _ name: String, _ i: Double) -> TodoItem {
+            TodoItem(title: title, day: today, sortIndex: i, list: name)
+        }
         return [
             mk("Finish the board deck for Friday", today, 1),
             mk("Reply to Dana about the contract", today, 2),
@@ -342,6 +379,10 @@ final class TaskStore {
             mk("Morning walk", today, 4, done: true),
             mk("Call Sam about logistics", tomorrow, 1),
             mk("Review the open pull requests", tomorrow, 2),
+            list("Plan the offsite", "Later", 1),
+            list("Learn a bit of Rust", "Later", 2),
+            list("Return the Amazon package", "Misc", 1),
+            list("Water the plants Tuesday", "Reminders", 1),
         ]
     }
 }

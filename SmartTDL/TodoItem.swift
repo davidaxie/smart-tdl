@@ -69,20 +69,26 @@ struct TodoItem: Identifiable, Codable, Hashable {
     var importance: Double? = nil
     var isPinned: Bool = false
     var recurrence: Recurrence? = nil
+    /// `nil` = a day-based task (scheduled, rolls forward, AI-ranked). A name =
+    /// the task lives in an undated parking-lot list (Later/Misc/…) and `day` is
+    /// ignored: it never rolls forward and isn't gravity-ranked.
+    var list: String? = nil
 
-    init(title: String, day: Date, sortIndex: Double, isCompleted: Bool = false, recurrence: Recurrence? = nil) {
+    init(title: String, day: Date, sortIndex: Double, isCompleted: Bool = false,
+         recurrence: Recurrence? = nil, list: String? = nil) {
         self.title = title
         self.day = Calendar.current.startOfDay(for: day)
         self.sortIndex = sortIndex
         self.isCompleted = isCompleted
         self.recurrence = recurrence
+        self.list = list
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, isCompleted, day, sortIndex, createdAt, importance, isPinned, recurrence
+        case id, title, isCompleted, day, sortIndex, createdAt, importance, isPinned, recurrence, list
     }
 
-    // Resilient decoding so older saved files (without pin/recurrence) still load.
+    // Resilient decoding so older saved files (without pin/recurrence/list) still load.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
@@ -94,5 +100,6 @@ struct TodoItem: Identifiable, Codable, Hashable {
         importance = try c.decodeIfPresent(Double.self, forKey: .importance)
         isPinned = try c.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
         recurrence = try c.decodeIfPresent(Recurrence.self, forKey: .recurrence)
+        list = try c.decodeIfPresent(String.self, forKey: .list)
     }
 }
