@@ -237,6 +237,8 @@ struct AddRow: View {
                 #endif
         }
         .padding(.vertical, Space.s)
+        .contentShape(Rectangle())
+        .onTapGesture { if !active { focusBinding.wrappedValue = day } }
     }
 
     private func submit() {
@@ -260,44 +262,155 @@ struct AddRow: View {
 #if os(macOS)
 // MARK: - Bespoke Mac shell
 
-/// Custom header: serif wordmark, hand-built layout toggle, and quiet action
-/// glyphs. Sits over the edge-to-edge warm canvas, clearing the traffic lights.
-struct MacHeader: View {
+/// No more glyph bar. The day masthead is the title; these few actions recede to
+/// a whisper in the top-right and only surface on hover. Everything else is ⌘K
+/// and the keyboard.
+struct QuietControls: View {
     @Binding var weekMode: Bool
     var onCapture: () -> Void
     var onFocus: () -> Void
     var onSettings: () -> Void
+    @State private var hovering = false
 
     var body: some View {
-        HStack(alignment: .center, spacing: Space.m) {
-            Text("Smart TDL")
-                .font(.display(20, relativeTo: .title3))
-                .foregroundStyle(Color.inkPrimary)
-                .tracking(0.4)
-
-            Spacer(minLength: Space.l)
-
-            icon("scope", help: "Focus now (⌘J)", action: onFocus)
-            icon("plus", help: "Quick capture (⌘K)", action: onCapture)
+        HStack(spacing: Space.s) {
             LayoutToggle(weekMode: $weekMode)
-            icon("slider.horizontal.3", help: "Settings (⌘,)", action: onSettings)
+            icon("plus", help: "Quick capture (⌘K)", action: onCapture)
+            icon("scope", help: "Focus now (⌘J)", action: onFocus)
+            icon("slider.horizontal.3", help: "Settings", action: onSettings)
         }
-        .padding(.top, 20)
-        .padding(.leading, 82)
-        .padding(.trailing, Space.xxl)
-        .padding(.bottom, Space.m)
+        .padding(.top, 16)
+        .padding(.trailing, Space.l)
+        .opacity(hovering ? 1 : 0.28)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.18), value: hovering)
     }
 
     private func icon(_ name: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: name)
-                .font(.system(size: 14, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Color.inkSecondary)
-                .frame(width: 28, height: 28)
+                .frame(width: 26, height: 26)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(help)
+    }
+}
+
+/// The threshold band: the day as masthead. Today gets the full editorial
+/// treatment — date, serif "Today", a word-sized "shape of the day" sparkline,
+/// and a hairline completion meander. Later days recede to a quiet line.
+struct TodayMasthead: View {
+    let day: Date
+    let isToday: Bool
+    let completion: Double
+    let openTasks: [TodoItem]
+    var onActivate: () -> Void
+    var onDropID: (String) -> Void
+
+    var body: some View {
+        Group {
+            if isToday { todayBand } else { laterBand }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { onActivate() }
+        .dropDestination(for: String.self) { ids, _ in
+            if let s = ids.first { onDropID(s) }
+            return true
+        }
+    }
+
+    private var todayBand: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(Self.fullDate(day))
+                .font(.system(.subheadline, design: .serif)).italic()
+                .foregroundStyle(Color.inkSecondary)
+            HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                Text(day.dayLabel)
+                    .font(.display(30, relativeTo: .title))
+                    .foregroundStyle(Color.inkPrimary)
+                Circle().fill(Color.accentInk).frame(width: 7, height: 7)
+                Spacer(minLength: Space.m)
+                Sparkline(tasks: openTasks)
+            }
+            Meander(fraction: completion)
+                .padding(.top, Space.s)
+        }
+        .padding(.bottom, Space.xl)
+    }
+
+    private var laterBand: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+            Text(day.dayLabel)
+                .font(.display(19, relativeTo: .title3))
+                .foregroundStyle(Color.inkSecondary)
+            Text(day.daySubLabel)
+                .font(.system(.caption, design: .serif))
+                .foregroundStyle(Color.inkTertiary)
+            Spacer(minLength: 0)
+        }
+        .padding(.top, Space.l)
+        .padding(.bottom, Space.s)
+    }
+
+    private static func fullDate(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "EEEE, MMMM d"
+        return f.string(from: d)
+    }
+}
+
+/// The "shape of the day": one stroke per open task, height by rank — a glance
+/// tells you how front-loaded the day is.
+private struct Sparkline: View {
+    let tasks: [TodoItem]
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 2) {
+            ForEach(Array(tasks.prefix(10).enumerated()), id: \.element.id) { idx, item in
+                Capsule()
+                    .fill(Color.inkTertiary)
+                    .frame(width: 2.5, height: Self.height(item, idx, tasks.count))
+            }
+        }
+        .frame(height: 16, alignment: .bottom)
+    }
+    private static func height(_ item: TodoItem, _ idx: Int, _ count: Int) -> CGFloat {
+        if let imp = item.importance { return 4 + CGFloat(imp) * 12 }
+        let t = count > 1 ? CGFloat(idx) / CGFloat(count - 1) : 0
+        return 4 + (1 - t) * 12
+    }
+}
+
+/// The day-completion meander: a hairline that fills terracotta as the pool grows.
+private struct Meander: View {
+    let fraction: Double
+    var body: some View {
+        Rectangle()
+            .fill(Color.hairline)
+            .frame(height: 2)
+            .overlay(alignment: .leading) {
+                GeometryReader { geo in
+                    Rectangle()
+                        .fill(Color.accentInk)
+                        .frame(width: geo.size.width * max(0, min(1, fraction)))
+                        .animation(Motion.settle, value: fraction)
+                }
+            }
+    }
+}
+
+/// The receded "Done today" tray label.
+private struct CompletedTrayHeader: View {
+    let count: Int
+    var body: some View {
+        Text("Done today · \(count)")
+            .font(.system(size: 12))
+            .tracking(0.3)
+            .foregroundStyle(Color.inkTertiary)
+            .padding(.top, Space.pool)
+            .padding(.bottom, Space.s)
     }
 }
 
@@ -352,18 +465,16 @@ struct MacListView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    greeting
                     if searchActive { searchField }
                     ForEach(store.visibleDays, id: \.self) { day in
                         section(day)
                     }
-                    hintBar
                 }
-                .frame(maxWidth: 660, alignment: .leading)
+                .frame(maxWidth: 620, alignment: .leading)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, Space.section)
-                .padding(.top, Space.s)
-                .padding(.bottom, 60)
+                .padding(.top, 34)
+                .padding(.bottom, 90)
             }
             .scrollContentBackground(.hidden)
             .animation(reduceMotion ? nil : Motion.settle, value: store.items)
@@ -395,76 +506,66 @@ struct MacListView: View {
     private func section(_ day: Date) -> some View {
         let open = filtered(store.openTasks(on: day))
         let done = filtered(store.completedTasks(on: day))
-        let focusID = store.focusTaskID(for: day)
         let isToday = Calendar.current.isDateInToday(day)
         let searching = !query.isEmpty
+        let flattened = isToday && store.topScoresClustered(on: day)
 
         if !searching || !open.isEmpty || !done.isEmpty {
-            DayMasthead(day: day, onActivate: { focusedDay = day }, onDropID: { drop($0, to: day) })
+            VStack(alignment: .leading, spacing: 0) {
+                TodayMasthead(day: day, isToday: isToday,
+                              completion: completion(open: open, done: done),
+                              openTasks: open,
+                              onActivate: { focusedDay = day },
+                              onDropID: { drop($0, to: day) })
 
-            ForEach(open) { item in macRow(item, isFocus: !searching && item.id == focusID) }
+                ForEach(Array(open.enumerated()), id: \.element.id) { idx, item in
+                    macRow(item, rank: idx, isToday: isToday, flattened: flattened, tray: false)
+                }
 
-            if open.isEmpty && done.isEmpty && isToday && !searching {
-                EmptyLine()
+                if open.isEmpty && done.isEmpty && isToday && !searching {
+                    EmptyLine()
+                }
+
+                if !searching {
+                    AddRow(day: day, focusBinding: $focusedDay, onEscape: { focusList() })
+                }
+
+                if !done.isEmpty {
+                    CompletedTrayHeader(count: done.count)
+                    ForEach(done) { item in macRow(item, rank: 0, isToday: false, flattened: false, tray: true) }
+                }
             }
-
-            if !searching {
-                AddRow(day: day, focusBinding: $focusedDay, onEscape: { focusList() })
-            }
-
-            if !done.isEmpty {
-                PoolDivider()
-                ForEach(done) { item in macRow(item, isFocus: false) }
-            }
-
-            Color.clear.frame(height: Space.l)
+            .padding(.bottom, isToday ? Space.section : Space.l)
         }
     }
 
-    private func macRow(_ item: TodoItem, isFocus: Bool) -> some View {
-        MacRow(item: item,
-               isFocus: isFocus,
-               isSelected: item.id == selectedID,
-               isEditing: item.id == editingID,
-               moveTargets: store.visibleDays,
-               onSelect: { selectedID = item.id; listFocused = true },
-               onBeginEdit: { selectedID = item.id; editingID = item.id },
-               onEndEdit: { editingID = nil; listFocused = true })
+    private func completion(open: [TodoItem], done: [TodoItem]) -> Double {
+        let total = open.count + done.count
+        return total == 0 ? 0 : Double(done.count) / Double(total)
     }
 
-    private var greeting: some View {
-        VStack(alignment: .leading, spacing: Space.xs) {
-            Text(Self.greetingText())
-                .font(.display(42, relativeTo: .largeTitle))
-                .foregroundStyle(Color.inkPrimary)
-            Text(Self.fullDate())
-                .font(.system(.subheadline, design: .serif)).italic()
-                .foregroundStyle(Color.inkSecondary)
+    private func macRow(_ item: TodoItem, rank: Int, isToday: Bool, flattened: Bool, tray: Bool) -> some View {
+        let kind: MacRow.Kind
+        if tray {
+            kind = .body(size: 13.5, color: .inkTertiary)
+        } else if isToday && rank == 0 {
+            kind = .hero(size: flattened ? 22 : 27,
+                         label: flattened ? "A FEW THINGS MATTER" : "NOW")
+        } else if isToday {
+            let g = Gravity.today(rank: rank, flattened: flattened)
+            kind = .body(size: g.size, color: g.color)
+        } else {
+            let g = Gravity.later(rank: rank)
+            kind = .body(size: g.size, color: g.color)
         }
-        .padding(.top, Space.l)
-        .padding(.bottom, Space.xl)
-    }
-
-    private static func greetingText() -> String {
-        switch Calendar.current.component(.hour, from: Date()) {
-        case 0..<12: return "Good morning"
-        case 12..<17: return "Good afternoon"
-        case 17..<22: return "Good evening"
-        default: return "Late night"
-        }
-    }
-
-    private static func fullDate() -> String {
-        let f = DateFormatter()
-        f.dateFormat = "EEEE, MMMM d"
-        return f.string(from: Date())
-    }
-
-    private var hintBar: some View {
-        Text("j/k move · space done · e edit · p pin · t·m·1–7 defer · ⌘K capture · ⌘J focus")
-            .font(.caption2)
-            .foregroundStyle(Color.inkTertiary)
-            .padding(.top, Space.l)
+        return MacRow(item: item,
+                      kind: kind,
+                      isSelected: item.id == selectedID,
+                      isEditing: item.id == editingID,
+                      moveTargets: store.visibleDays,
+                      onSelect: { selectedID = item.id; listFocused = true },
+                      onBeginEdit: { selectedID = item.id; editingID = item.id },
+                      onEndEdit: { editingID = nil; listFocused = true })
     }
 
     private var searchField: some View {
@@ -512,7 +613,10 @@ struct MacListView: View {
     }
 
     private func handleKey(_ press: KeyPress) -> KeyPress.Result {
-        guard editingID == nil else { return .ignored }
+        // Never intercept keys while any text field is active — editing a row, the
+        // add field, or search. Otherwise letters like t/m/e/p/x fire commands
+        // instead of typing, which makes task entry feel broken.
+        guard editingID == nil, focusedDay == nil, !searchFocused else { return .ignored }
         let order = navOrder()
 
         switch press.key {
@@ -613,12 +717,14 @@ struct MacListView: View {
     }
 }
 
-/// A keyboard-first Mac row: plain text until edited (so the list keeps key
-/// focus), with a soft hover wash and selection tint.
+/// One task, rendered at one of two altitudes in the gravity field: the crowned
+/// `hero` (serif, large, on a warm elevated card with a NOW label and an on-hover
+/// "why first" whisper) or a `body` row whose size + ink encode its rank. All the
+/// editing/selection/drag logic is shared so the crown can change hands in place.
 private struct MacRow: View {
     @Environment(TaskStore.self) private var store
     let item: TodoItem
-    let isFocus: Bool
+    let kind: Kind
     let isSelected: Bool
     let isEditing: Bool
     let moveTargets: [Date]
@@ -626,15 +732,20 @@ private struct MacRow: View {
     var onBeginEdit: () -> Void
     var onEndEdit: () -> Void
 
+    enum Kind {
+        case hero(size: CGFloat, label: String)
+        case body(size: CGFloat, color: Color)
+    }
+
     @State private var text: String
     @State private var hovering = false
     @State private var didCommit = false
     @FocusState private var fieldFocused: Bool
 
-    init(item: TodoItem, isFocus: Bool, isSelected: Bool, isEditing: Bool, moveTargets: [Date],
+    init(item: TodoItem, kind: Kind, isSelected: Bool, isEditing: Bool, moveTargets: [Date],
          onSelect: @escaping () -> Void, onBeginEdit: @escaping () -> Void, onEndEdit: @escaping () -> Void) {
         self.item = item
-        self.isFocus = isFocus
+        self.kind = kind
         self.isSelected = isSelected
         self.isEditing = isEditing
         self.moveTargets = moveTargets
@@ -644,17 +755,103 @@ private struct MacRow: View {
         _text = State(initialValue: item.title)
     }
 
+    private var isHero: Bool { if case .hero = kind { return true }; return false }
+
+    private var rowFont: Font {
+        switch kind {
+        case .hero(let size, _): return .display(size, relativeTo: .title)
+        case .body(let size, _): return .system(size: size, design: .default)
+        }
+    }
+
     private var textColor: Color {
         if item.isCompleted { return .inkTertiary }
-        return isFocus ? .inkPrimary : .inkBody
+        switch kind {
+        case .hero: return .inkPrimary
+        case .body(_, let color): return color
+        }
     }
-    private var rowFont: Font { .system(isFocus ? .title2 : .body, design: .default) }
+
+    private var toggleFrame: CGFloat { isHero ? 30 : 26 }
+
+    /// An honest, never-fabricated reason the AI placed this on top.
+    private var heroWhy: String {
+        if item.isPinned { return "you pinned this to the top" }
+        if item.recurrence != nil { return "it’s part of your routine" }
+        return "ranked highest for today"
+    }
 
     var body: some View {
+        Group {
+            if isHero { heroBody } else { bodyRow }
+        }
+        .animation(Motion.settle, value: isSelected)
+        .onHover { h in hovering = h; store.setInteracting(item.id, h) }
+        .draggable(item.id.uuidString)
+        .contextMenu { contextMenu }
+        .onChange(of: isEditing) { _, editing in
+            if editing { text = item.title; fieldFocused = true; didCommit = false }
+        }
+        .onChange(of: item.title) { _, t in if !isEditing { text = t } }
+        .onChange(of: fieldFocused) { _, focused in
+            if !focused && isEditing { commit() }
+        }
+    }
+
+    private var heroBody: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(heroLabel)
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(4)
+                .foregroundStyle(Color.accentInk)
+            rowContent
+                .padding(.vertical, Space.m)
+                .padding(.horizontal, Space.l)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color(light: Color(hex: 0xFFFDF8), dark: Color(hex: 0x232019)))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(isSelected ? Color.accentInk.opacity(0.55) : Color.hairline,
+                                      lineWidth: isSelected ? 1.5 : 0.8)
+                )
+            if hovering && !isEditing {
+                Text(heroWhy)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Color.inkSecondary)
+                    .padding(.leading, 2)
+                    .transition(.opacity)
+            }
+        }
+        .padding(.vertical, Space.s)
+    }
+
+    private var heroLabel: String {
+        if case .hero(_, let label) = kind { return label }
+        return "NOW"
+    }
+
+    private var bodyRow: some View {
+        rowContent
+            .padding(.vertical, 7)
+            .padding(.horizontal, Space.s)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(background))
+            .overlay(alignment: .leading) {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(Color.accentInk)
+                        .frame(width: 3)
+                        .padding(.vertical, 5)
+                }
+            }
+    }
+
+    private var rowContent: some View {
         HStack(alignment: .center, spacing: Space.m) {
             Button { store.toggle(item) } label: {
                 CompletionToggle(isOn: item.isCompleted)
-                    .frame(width: 30, height: 30)
+                    .frame(width: toggleFrame, height: toggleFrame)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -672,7 +869,7 @@ private struct MacRow: View {
                     .font(rowFont)
                     .foregroundStyle(textColor)
                     .strikethrough(item.isCompleted, color: .inkTertiary)
-                    .lineLimit(1)
+                    .lineLimit(isHero ? 2 : 1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
@@ -693,32 +890,10 @@ private struct MacRow: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.vertical, isFocus ? Space.l : 7)
-        .padding(.horizontal, Space.s)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(background))
-        .overlay(alignment: .leading) {
-            if isSelected {
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Color.accentInk)
-                    .frame(width: 3)
-                    .padding(.vertical, 5)
-            }
-        }
-        .animation(Motion.settle, value: isFocus)
-        .onHover { h in hovering = h; store.setInteracting(item.id, h) }
-        .draggable(item.id.uuidString)
-        .contextMenu { contextMenu }
-        .onChange(of: isEditing) { _, editing in
-            if editing { text = item.title; fieldFocused = true; didCommit = false }
-        }
-        .onChange(of: item.title) { _, t in if !isEditing { text = t } }
-        .onChange(of: fieldFocused) { _, focused in
-            if !focused && isEditing { commit() }
-        }
     }
 
     private var background: Color {
-        if item.isCompleted { return Color.surfacePool.opacity(0.5) }
+        if item.isCompleted { return .clear }
         if isSelected { return Color.accentInk.opacity(0.06) }
         if hovering { return Color.inkPrimary.opacity(0.035) }
         return .clear

@@ -94,6 +94,43 @@ enum Motion {
     static let settle = Animation.spring(response: 0.40, dampingFraction: 0.85)
     static let complete = Animation.spring(response: 0.32, dampingFraction: 0.55)
     static let press = Animation.spring(response: 0.25, dampingFraction: 0.50)
+    /// The signature ambient re-rank: slow, high-damping, zero overshoot. This is
+    /// the AI "thinking out loud" — fired only at safe idle moments, never under
+    /// the cursor. Calmer and longer than `settle` so a re-sort reads as reasoning.
+    static let ambient = Animation.spring(response: 0.62, dampingFraction: 0.90)
+}
+
+// MARK: - Gravity ramp (rank → pre-attentive type size + ink, one channel)
+
+/// Maps a task's rank position within its day to a quantized type size and ink
+/// tone — the single pre-attentive channel that encodes importance (Healey/Ware).
+/// Quantized to fixed steps snapped to the grid so the column never jitters on a
+/// re-rank. `flattened` compresses the ramp when the ranker isn't confident.
+enum Gravity {
+    /// On-deck / body rows for Today (rank 1 = just under the hero).
+    static func today(rank: Int, flattened: Bool) -> (size: CGFloat, color: Color) {
+        if flattened {
+            switch rank {
+            case 1, 2, 3: return (16, .inkBody)
+            default: return (14, .inkSecondary)
+            }
+        }
+        switch rank {
+        case 1: return (18, .inkPrimary)
+        case 2: return (16.5, .inkBody)
+        case 3: return (15.5, .inkBody)
+        case 4: return (14.5, .inkSecondary)
+        default: return (14, .inkSecondary)   // floor — still clears 4.5:1
+        }
+    }
+
+    /// Receding strata: later days are quieter so Today owns the screen.
+    static func later(rank: Int) -> (size: CGFloat, color: Color) {
+        switch rank {
+        case 0, 1: return (15, .inkSecondary)
+        default: return (14, .inkSecondary)
+        }
+    }
 }
 
 // MARK: - Date helpers

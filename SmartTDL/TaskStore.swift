@@ -23,6 +23,9 @@ final class TaskStore {
     private let saveURL: URL
     private let calendar = Calendar.current
     private var ranker: Ranker = HeuristicRanker()
+    /// True once a real AI ranker (Haiku) is active — gates the honest-confidence
+    /// hedge, which only makes sense when the scores carry genuine uncertainty.
+    private(set) var usingAI = false
     private var rankTask: Task<Void, Never>?
     private var idleCommitTask: Task<Void, Never>?
     private var pendingScores: [UUID: Double] = [:]
@@ -97,6 +100,17 @@ final class TaskStore {
     /// The focus task = the top open task of Today.
     func focusTaskID(for day: Date) -> UUID? {
         calendar.isDateInToday(day) ? openTasks(on: day).first?.id : nil
+    }
+
+    /// True when the top two open tasks' AI scores cluster so tightly that
+    /// crowning a single #1 would assert false confidence. The gravity ramp then
+    /// flattens and the hero label hedges ("a few things matter"). Honest UI over
+    /// an uncertain system avoids teaching blind trust. Needs both top tasks ranked.
+    func topScoresClustered(on day: Date) -> Bool {
+        guard usingAI else { return false }   // heuristic scores tie too often to be honest signal
+        let top = Array(openTasks(on: day).prefix(2))
+        guard top.count == 2, let a = top[0].importance, let b = top[1].importance else { return false }
+        return (a - b) < 0.06
     }
 
     /// Pinned-first → importance desc (unranked last) → manual order. (Completed sink.)
@@ -259,8 +273,10 @@ final class TaskStore {
             guard let self else { return }
             if let key, !key.isEmpty {
                 self.ranker = HaikuRanker(apiKey: key)
+                self.usingAI = true
             } else {
                 self.ranker = HeuristicRanker()
+                self.usingAI = false
             }
             self.scheduleRank()
         }

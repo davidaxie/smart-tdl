@@ -29,24 +29,20 @@ struct ContentView: View {
         #if os(macOS)
         ZStack {
             Color.bgCanvas.ignoresSafeArea()
-            PaperGrain()
-            VStack(spacing: 0) {
-                MacHeader(weekMode: $weekMode,
+            Group {
+                if weekMode {
+                    WeekBoardView()
+                } else {
+                    MacListView()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .overlay(alignment: .topTrailing) {
+            QuietControls(weekMode: $weekMode,
                           onCapture: { showCommandBar = true },
                           onFocus: { showFocusMode = true },
                           onSettings: { showSettings = true })
-                Rectangle()
-                    .fill(Color.hairline)
-                    .frame(height: 1)
-                Group {
-                    if weekMode {
-                        WeekBoardView()
-                    } else {
-                        MacListView()
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
         }
         .overlay {
             if showCommandBar {
