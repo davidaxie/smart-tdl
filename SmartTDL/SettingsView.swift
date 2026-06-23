@@ -9,10 +9,21 @@ struct SettingsView: View {
     @State private var key: String = ""
     @State private var context: String = ""
     @State private var hasKey: Bool = Keychain.hasKey
+    @AppStorage("smarttdl.appearance") private var appearance = Appearance.system.rawValue
 
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Picker("Appearance", selection: $appearance) {
+                        ForEach(Appearance.allCases, id: \.rawValue) { mode in
+                            Label(mode.label, systemImage: mode.symbol).tag(mode.rawValue)
+                        }
+                    }
+                } header: {
+                    Text("Appearance")
+                }
+
                 Section {
                     SecureField(hasKey ? "Enter a new key to replace" : "sk-ant-…", text: $key)
                         #if os(iOS)

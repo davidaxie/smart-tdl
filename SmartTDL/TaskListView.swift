@@ -270,11 +270,17 @@ struct QuietControls: View {
     var onCapture: () -> Void
     var onFocus: () -> Void
     var onSettings: () -> Void
+    @AppStorage("smarttdl.appearance") private var appearance = Appearance.system.rawValue
     @State private var hovering = false
+
+    private var mode: Appearance { Appearance(rawValue: appearance) ?? .system }
 
     var body: some View {
         HStack(spacing: Space.s) {
             LayoutToggle(weekMode: $weekMode)
+            icon(mode.symbol, help: "Appearance: \(mode.label)") {
+                withAnimation(.easeInOut(duration: 0.25)) { appearance = mode.next.rawValue }
+            }
             icon("plus", help: "Quick capture (⌘K)", action: onCapture)
             icon("scope", help: "Focus now (⌘J)", action: onFocus)
             icon("slider.horizontal.3", help: "Settings", action: onSettings)
@@ -805,11 +811,12 @@ private struct MacRow: View {
                 .tracking(4)
                 .foregroundStyle(Color.accentInk)
             rowContent
-                .padding(.vertical, Space.m)
+                .padding(.vertical, Space.l)
                 .padding(.horizontal, Space.l)
                 .background(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color(light: Color(hex: 0xFFFDF8), dark: Color(hex: 0x232019)))
+                        .fill(Color.cardElevated)
+                        .shadow(color: Color.black.opacity(0.05), radius: 12, y: 4)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)

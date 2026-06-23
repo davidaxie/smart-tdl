@@ -5,6 +5,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var showSettings = false
     @AppStorage("smarttdl.macWeekLayout") private var weekMode = false
+    @AppStorage("smarttdl.appearance") private var appearance = Appearance.system.rawValue
     #if os(macOS)
     @State private var showCommandBar = false
     @State private var showFocusMode = false
@@ -13,6 +14,7 @@ struct ContentView: View {
     var body: some View {
         shell
             .tint(.accentInk)
+            .preferredColorScheme(Appearance(rawValue: appearance)?.colorScheme)
             .sheet(isPresented: $showSettings) {
                 SettingsView().environment(store)
             }
