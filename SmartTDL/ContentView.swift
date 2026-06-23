@@ -4,7 +4,7 @@ struct ContentView: View {
     @Environment(TaskStore.self) private var store
     @Environment(\.scenePhase) private var scenePhase
     @State private var showSettings = false
-    @AppStorage("smarttdl.macWeekLayout") private var weekMode = false
+    @AppStorage("smarttdl.macWeekLayout") private var weekMode = true
     @AppStorage("smarttdl.appearance") private var appearance = Appearance.system.rawValue
     #if os(macOS)
     @State private var showCommandBar = false

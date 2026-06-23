@@ -1301,19 +1301,19 @@ struct WeekBoardView: View {
     @State private var editingID: UUID?
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: Space.l) {
-                ForEach(store.visibleDays, id: \.self) { day in
-                    DayColumn(day: day, focusBinding: $focusedDay, editingID: $editingID)
-                        .frame(width: 248)
-                }
+        HStack(alignment: .top, spacing: Space.m) {
+            ForEach(store.visibleDays, id: \.self) { day in
+                DayColumn(day: day, focusBinding: $focusedDay, editingID: $editingID)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
-            .padding(.horizontal, Space.xl)
-            .padding(.top, 44)        // clear the floating traffic lights + controls
-            .padding(.bottom, Space.l)
-            .frame(maxHeight: .infinity, alignment: .top)
         }
-        .scrollContentBackground(.hidden)
+        // Cap the board and center it so the week reads as a contained planner
+        // with real margins — not seven sparse columns spread edge to edge.
+        .frame(maxWidth: 1320, maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, Space.section)
+        .padding(.top, 56)            // clear the floating traffic lights + controls
+        .padding(.bottom, Space.xl)
         .animation(reduceMotion ? nil : Motion.settle, value: store.items)
         .onChange(of: store.newTaskToken) { _, _ in
             focusedDay = Calendar.current.startOfDay(for: Date())
@@ -1367,7 +1367,15 @@ private struct DayColumn: View {
                 .padding(.bottom, Space.l)
             }
         }
-        .frame(maxHeight: .infinity, alignment: .top)
+        .padding(.horizontal, Space.s)
+        .padding(.top, Space.m)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // A faint full-height lane so each day is a defined column, not text
+        // floating in a void — Today's lane is a touch warmer.
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.surfacePool.opacity(isToday ? 0.6 : 0.3))
+        )
         .dropDestination(for: String.self) { ids, _ in
             if let s = ids.first, let id = UUID(uuidString: s), let it = store.item(id) {
                 store.move(it, to: day)
