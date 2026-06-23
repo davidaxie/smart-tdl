@@ -281,7 +281,6 @@ struct AddRow: View {
 /// a whisper in the top-right and only surface on hover. Everything else is ⌘K
 /// and the keyboard.
 struct QuietControls: View {
-    @Binding var weekMode: Bool
     var onCapture: () -> Void
     var onFocus: () -> Void
     var onSettings: () -> Void
@@ -292,7 +291,7 @@ struct QuietControls: View {
 
     var body: some View {
         HStack(spacing: Space.s) {
-            LayoutToggle(weekMode: $weekMode)
+            DayCountToggle()
             icon(mode.symbol, help: "Appearance: \(mode.label)") {
                 withAnimation(.easeInOut(duration: 0.25)) { appearance = mode.next.rawValue }
             }
@@ -435,32 +434,32 @@ private struct CompletedTrayHeader: View {
     }
 }
 
-private struct LayoutToggle: View {
-    @Binding var weekMode: Bool
+/// How many days the week board shows. Replaces the old list/week toggle.
+private struct DayCountToggle: View {
+    @AppStorage("smarttdl.weekDays") private var weekDays = 7
+    private let options = [3, 5, 7]
 
     var body: some View {
         HStack(spacing: 2) {
-            segment(symbol: "list.bullet", on: !weekMode) { set(false) }
-            segment(symbol: "rectangle.split.3x1", on: weekMode) { set(true) }
+            ForEach(options, id: \.self) { n in segment(n) }
         }
         .padding(3)
         .background(Capsule().fill(Color.inkPrimary.opacity(0.06)))
     }
 
-    private func set(_ value: Bool) {
-        withAnimation(Motion.press) { weekMode = value }
-    }
-
-    private func segment(symbol: String, on: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(on ? Color.bgCanvas : Color.inkSecondary)
-                .frame(width: 32, height: 24)
-                .background(Capsule().fill(on ? Color.accentInk : Color.clear))
+    private func segment(_ n: Int) -> some View {
+        Button {
+            withAnimation(Motion.press) { weekDays = n }
+        } label: {
+            Text("\(n)")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(weekDays == n ? Color.bgCanvas : Color.inkSecondary)
+                .frame(width: 22, height: 22)
+                .background(Capsule().fill(weekDays == n ? Color.accentInk : Color.clear))
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .help("\(n) days")
     }
 }
 
@@ -597,16 +596,16 @@ struct MacListView: View {
     private func macRow(_ item: TodoItem, rank: Int, isToday: Bool, flattened: Bool, tray: Bool) -> some View {
         let kind: MacRow.Kind
         if tray {
-            kind = .body(size: 13.5, color: .inkTertiary)
+            kind = .body(size: 13.5, weight: .regular, color: .inkTertiary)
         } else if isToday && rank == 0 {
             kind = .hero(size: flattened ? 22 : 27,
                          label: flattened ? "A FEW THINGS MATTER" : "NOW")
         } else if isToday {
             let g = Gravity.today(rank: rank, flattened: flattened)
-            kind = .body(size: g.size, color: g.color)
+            kind = .body(size: g.size, weight: rank == 1 ? .medium : .regular, color: g.color)
         } else {
             let g = Gravity.later(rank: rank)
-            kind = .body(size: g.size, color: g.color)
+            kind = .body(size: g.size, weight: .regular, color: g.color)
         }
         return MacRow(item: item,
                       kind: kind,
@@ -784,7 +783,7 @@ private struct MacRow: View {
 
     enum Kind {
         case hero(size: CGFloat, label: String)
-        case body(size: CGFloat, color: Color)
+        case body(size: CGFloat, weight: Font.Weight, color: Color)
     }
 
     @State private var text: String
@@ -810,7 +809,7 @@ private struct MacRow: View {
     private var rowFont: Font {
         switch kind {
         case .hero(let size, _): return .display(size, relativeTo: .title)
-        case .body(let size, _): return .system(size: size, design: .default)
+        case .body(let size, let weight, _): return .system(size: size, weight: weight, design: .default)
         }
     }
 
@@ -818,7 +817,7 @@ private struct MacRow: View {
         if item.isCompleted { return .inkTertiary }
         switch kind {
         case .hero: return .inkPrimary
-        case .body(_, let color): return color
+        case .body(_, _, let color): return color
         }
     }
 
@@ -1061,7 +1060,7 @@ private struct SideList: View {
 
     private func row(_ item: TodoItem) -> some View {
         MacRow(item: item,
-               kind: .body(size: 14, color: .inkBody),
+               kind: .body(size: 14, weight: .regular, color: .inkBody),
                isSelected: false,
                isEditing: item.id == editingID,
                moveTargets: store.visibleDays,
@@ -1297,26 +1296,44 @@ struct CaptureMenuView: View {
 struct WeekBoardView: View {
     @Environment(TaskStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage("smarttdl.weekDays") private var weekDays = 7
     @FocusState private var focusedDay: Date?
     @State private var editingID: UUID?
 
+    private let gap: CGFloat = Space.m
+    private let margin: CGFloat = Space.section
+
     var body: some View {
-        HStack(alignment: .top, spacing: Space.m) {
-            ForEach(store.visibleDays, id: \.self) { day in
-                DayColumn(day: day, focusBinding: $focusedDay, editingID: $editingID)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        GeometryReader { geo in
+            let days = Array(store.visibleDays.prefix(max(1, weekDays)))
+            let dayCount = max(1, days.count)
+            // Size lanes so the chosen days fill the viewport; the undated list
+            // lanes trail to the right and are reached by scrolling.
+            let availForDays = geo.size.width - margin * 2 - gap * CGFloat(dayCount - 1)
+            let laneW = max(168, min(300, availForDays / CGFloat(dayCount)))
+            let laneH = max(0, geo.size.height - 56 - Space.xl)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: gap) {
+                    ForEach(days, id: \.self) { day in
+                        DayColumn(day: day, focusBinding: $focusedDay, editingID: $editingID)
+                            .frame(width: laneW)
+                    }
+                    ForEach(TaskStore.listNames, id: \.self) { name in
+                        ListLane(name: name, editingID: $editingID)
+                            .frame(width: laneW)
+                    }
+                }
+                .frame(height: laneH, alignment: .top)
+                .padding(.horizontal, margin)
+                .padding(.top, 56)
+                .padding(.bottom, Space.xl)
             }
-        }
-        // Cap the board and center it so the week reads as a contained planner
-        // with real margins — not seven sparse columns spread edge to edge.
-        .frame(maxWidth: 1320, maxHeight: .infinity, alignment: .top)
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, Space.section)
-        .padding(.top, 56)            // clear the floating traffic lights + controls
-        .padding(.bottom, Space.xl)
-        .animation(reduceMotion ? nil : Motion.settle, value: store.items)
-        .onChange(of: store.newTaskToken) { _, _ in
-            focusedDay = Calendar.current.startOfDay(for: Date())
+            .scrollContentBackground(.hidden)
+            .animation(reduceMotion ? nil : Motion.settle, value: store.items)
+            .onChange(of: store.newTaskToken) { _, _ in
+                focusedDay = Calendar.current.startOfDay(for: Date())
+            }
         }
     }
 }
@@ -1387,7 +1404,7 @@ private struct DayColumn: View {
     private func weekRow(_ item: TodoItem, rank: Int) -> some View {
         let g = Gravity.column(rank: rank)
         return MacRow(item: item,
-                      kind: .body(size: g.size, color: g.color),
+                      kind: .body(size: g.size, weight: g.weight, color: g.color),
                       isSelected: false,
                       isEditing: item.id == editingID,
                       moveTargets: store.visibleDays,
@@ -1417,6 +1434,27 @@ private struct ColumnMasthead: View {
         }
         .padding(.horizontal, Space.s)
         .contentShape(Rectangle())
+    }
+}
+
+/// A parking-lot list as a board lane (Later / Misc / Reminders) — same lane
+/// chrome as a day, but undated. Sits after the day lanes.
+private struct ListLane: View {
+    let name: String
+    @Binding var editingID: UUID?
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            SideList(name: name, editingID: $editingID)
+                .padding(.bottom, Space.l)
+        }
+        .padding(.horizontal, Space.s)
+        .padding(.top, Space.m)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.surfacePool.opacity(0.3))
+        )
     }
 }
 #endif

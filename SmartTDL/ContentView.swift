@@ -4,7 +4,6 @@ struct ContentView: View {
     @Environment(TaskStore.self) private var store
     @Environment(\.scenePhase) private var scenePhase
     @State private var showSettings = false
-    @AppStorage("smarttdl.macWeekLayout") private var weekMode = true
     @AppStorage("smarttdl.appearance") private var appearance = Appearance.system.rawValue
     #if os(macOS)
     @State private var showCommandBar = false
@@ -31,18 +30,11 @@ struct ContentView: View {
         #if os(macOS)
         ZStack {
             Color.bgCanvas.ignoresSafeArea()
-            Group {
-                if weekMode {
-                    WeekBoardView()
-                } else {
-                    MacListView()
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            WeekBoardView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .overlay(alignment: .topTrailing) {
-            QuietControls(weekMode: $weekMode,
-                          onCapture: { showCommandBar = true },
+            QuietControls(onCapture: { showCommandBar = true },
                           onFocus: { showFocusMode = true },
                           onSettings: { showSettings = true })
         }

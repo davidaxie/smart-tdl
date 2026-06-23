@@ -167,14 +167,15 @@ enum Gravity {
         }
     }
 
-    /// Week-board columns: a tighter ramp (columns are narrow), same single
-    /// channel so each day's top task is visibly the heaviest.
-    static func column(rank: Int) -> (size: CGFloat, color: Color) {
+    /// Week-board columns: a deliberately PRONOUNCED ramp so the AI's #1 is
+    /// unmistakably the heaviest — size and weight and ink all step together.
+    static func column(rank: Int) -> (size: CGFloat, weight: Font.Weight, color: Color) {
         switch rank {
-        case 0: return (16.5, .inkPrimary)
-        case 1: return (14.5, .inkBody)
-        case 2: return (14, .inkBody)
-        default: return (13, .inkSecondary)
+        case 0: return (20, .semibold, .inkPrimary)
+        case 1: return (16, .medium, .inkBody)
+        case 2: return (14.5, .regular, .inkBody)
+        case 3: return (13.5, .regular, .inkSecondary)
+        default: return (13, .regular, .inkSecondary)
         }
     }
 }
