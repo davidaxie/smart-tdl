@@ -1,4 +1,5 @@
 import Foundation
+import CloudKit
 
 /// How a task repeats. On completion the task regenerates on its next date.
 enum Recurrence: Codable, Hashable {
@@ -107,5 +108,87 @@ struct TodoItem: Identifiable, Codable, Hashable {
         isPinned = try c.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
         recurrence = try c.decodeIfPresent(Recurrence.self, forKey: .recurrence)
         list = try c.decodeIfPresent(String.self, forKey: .list)
+    }
+}
+
+// MARK: - CloudKit record mapping (sync — see docs/sync-plan.md §3)
+
+/// One `Task` CKRecord per task, keyed by the task's `id`. `importance` is
+/// intentionally NOT synced — it's local AI output computed per device. These are
+/// pure, offline functions (a CKRecord is in-memory), so they're unit-testable
+/// without an iCloud account; the `CKSyncEngine` that drives them is added once the
+/// container exists. Co-located here (vs. a new file) to avoid a project-file change.
+extension TodoItem {
+    enum Sync {
+        static let recordType = "Task"
+        static let zoneName = "TasksZone"
+        enum Key {
+            static let title = "title"
+            static let isCompleted = "isCompleted"
+            static let day = "day"
+            static let sortIndex = "sortIndex"
+            static let createdAt = "createdAt"
+            static let modifiedAt = "modifiedAt"
+            static let isPinned = "isPinned"
+            static let recurrence = "recurrence"   // Recurrence encoded as JSON
+            static let list = "list"
+        }
+    }
+
+    /// The stable record ID for this task in the given zone.
+    func recordID(in zoneID: CKRecordZone.ID) -> CKRecord.ID {
+        CKRecord.ID(recordName: id.uuidString, zoneID: zoneID)
+    }
+
+    /// Write this task's synced fields onto a record (a fresh one when creating, or
+    /// the server's existing record when updating so its change tag is preserved).
+    @discardableResult
+    func populate(_ record: CKRecord) -> CKRecord {
+        record[Sync.Key.title] = title
+        record[Sync.Key.isCompleted] = Int64(isCompleted ? 1 : 0)
+        record[Sync.Key.day] = day
+        record[Sync.Key.sortIndex] = sortIndex
+        record[Sync.Key.createdAt] = createdAt
+        record[Sync.Key.modifiedAt] = modifiedAt
+        record[Sync.Key.isPinned] = Int64(isPinned ? 1 : 0)
+        if let r = Self.encodeRecurrence(recurrence) { record[Sync.Key.recurrence] = r }
+        else { record[Sync.Key.recurrence] = nil }
+        if let l = list { record[Sync.Key.list] = l } else { record[Sync.Key.list] = nil }
+        // importance is deliberately omitted — local-only (sync-plan §3).
+        return record
+    }
+
+    /// A new record for this task in the given zone.
+    func makeRecord(in zoneID: CKRecordZone.ID) -> CKRecord {
+        populate(CKRecord(recordType: Sync.recordType, recordID: recordID(in: zoneID)))
+    }
+
+    /// Reconstruct a task from a record. Returns nil for a wrong type or a record
+    /// name that isn't a UUID. `importance` comes back nil (not synced).
+    init?(record: CKRecord) {
+        guard record.recordType == Sync.recordType,
+              let uuid = UUID(uuidString: record.recordID.recordName) else { return nil }
+        self.init(
+            title: (record[Sync.Key.title] as? String) ?? "",
+            day: (record[Sync.Key.day] as? Date) ?? Date(),
+            sortIndex: (record[Sync.Key.sortIndex] as? Double) ?? 0,
+            isCompleted: ((record[Sync.Key.isCompleted] as? Int64) ?? 0) != 0,
+            recurrence: Self.decodeRecurrence(record[Sync.Key.recurrence] as? String),
+            list: record[Sync.Key.list] as? String
+        )
+        self.id = uuid
+        self.isPinned = ((record[Sync.Key.isPinned] as? Int64) ?? 0) != 0
+        if let c = record[Sync.Key.createdAt] as? Date { self.createdAt = c }
+        self.modifiedAt = (record[Sync.Key.modifiedAt] as? Date) ?? self.createdAt
+    }
+
+    static func encodeRecurrence(_ r: Recurrence?) -> String? {
+        guard let r, let data = try? JSONEncoder().encode(r) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func decodeRecurrence(_ s: String?) -> Recurrence? {
+        guard let s, let data = s.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(Recurrence.self, from: data)
     }
 }

@@ -1,4 +1,5 @@
 import XCTest
+import CloudKit
 @testable import SmartTDL
 
 // MARK: - The ordering rule (TaskStore.order)
@@ -265,5 +266,57 @@ final class ModifiedAtTests: XCTestCase {
         XCTAssertEqual(store.item(t.id)?.importance, 0.9, "importance is applied")
         XCTAssertEqual(store.item(t.id)!.modifiedAt, before,
                        "an importance/rank commit must NOT bump modifiedAt (importance is local, not synced)")
+    }
+}
+
+// MARK: - TodoItem <-> CKRecord mapping (docs/sync-plan.md §3)
+
+final class CloudKitMappingTests: XCTestCase {
+    private let zoneID = CKRecordZone.ID(zoneName: TodoItem.Sync.zoneName, ownerName: CKCurrentUserDefaultName)
+    private var today: Date { Calendar.current.startOfDay(for: Date()) }
+
+    func testRecordTypeAndNameAreStable() {
+        let t = TodoItem(title: "x", day: today, sortIndex: 1)
+        let record = t.makeRecord(in: zoneID)
+        XCTAssertEqual(record.recordType, "Task")
+        XCTAssertEqual(record.recordID.recordName, t.id.uuidString, "record name must be the task id")
+    }
+
+    func testRoundTripPreservesSyncedFields() throws {
+        var t = TodoItem(title: "Email Dana", day: today, sortIndex: 3, recurrence: .weekdays, list: nil)
+        t.isPinned = true
+        t.importance = 0.8                       // local-only — must NOT survive
+        t.modifiedAt = Date(timeIntervalSinceNow: -120)
+
+        let back = try XCTUnwrap(TodoItem(record: t.makeRecord(in: zoneID)))
+
+        XCTAssertEqual(back.id, t.id)
+        XCTAssertEqual(back.title, t.title)
+        XCTAssertEqual(back.day, t.day)
+        XCTAssertEqual(back.sortIndex, t.sortIndex)
+        XCTAssertEqual(back.isCompleted, t.isCompleted)
+        XCTAssertTrue(back.isPinned)
+        XCTAssertEqual(back.recurrence, .weekdays)
+        XCTAssertNil(back.list)
+        XCTAssertEqual(back.createdAt, t.createdAt)
+        XCTAssertEqual(back.modifiedAt, t.modifiedAt)
+        XCTAssertNil(back.importance, "importance must not round-trip through CloudKit (local-only)")
+    }
+
+    func testParkingLotTaskRoundTrips() throws {
+        let t = TodoItem(title: "Plan offsite", day: today, sortIndex: 1, list: "Later")
+        let back = try XCTUnwrap(TodoItem(record: t.makeRecord(in: zoneID)))
+        XCTAssertEqual(back.list, "Later")
+        XCTAssertNil(back.recurrence)
+    }
+
+    func testInitRejectsWrongTypeAndNonUUIDName() {
+        let wrongType = CKRecord(recordType: "NotATask",
+                                 recordID: CKRecord.ID(recordName: UUID().uuidString, zoneID: zoneID))
+        XCTAssertNil(TodoItem(record: wrongType))
+
+        let badName = CKRecord(recordType: "Task",
+                               recordID: CKRecord.ID(recordName: "not-a-uuid", zoneID: zoneID))
+        XCTAssertNil(TodoItem(record: badName))
     }
 }
