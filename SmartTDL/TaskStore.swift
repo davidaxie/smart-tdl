@@ -30,6 +30,10 @@ final class TaskStore {
     private var idleCommitTask: Task<Void, Never>?
     private var pendingScores: [UUID: Double] = [:]
     private var interacting: Set<UUID> = []
+    // Remote task changes from sync, buffered like pendingScores so they apply only
+    // at safe moments — a remote edit must never reorder a row under the hand (P5).
+    private var pendingRemoteUpserts: [UUID: TodoItem] = [:]
+    private var pendingRemoteDeletes: Set<UUID> = []
     private var undoStack: [UndoStep] = []
 
     private enum UndoStep {
@@ -298,7 +302,7 @@ final class TaskStore {
             interacting.insert(id)
         } else {
             interacting.remove(id)
-            if interacting.isEmpty { commitPendingRank() }
+            if interacting.isEmpty { commitPendingRank(); commitPendingRemote() }
         }
     }
 
@@ -314,6 +318,50 @@ final class TaskStore {
         }
         pendingScores.removeAll()
         if changed { save() }
+    }
+
+    // MARK: - Remote sync merges (buffered, safe-moment commit; honors P5)
+
+    /// Merge remote task changes from sync. LWW on `modifiedAt`; local `importance`
+    /// is preserved (it isn't synced). Buffered and applied only at safe moments so a
+    /// remote change never reorders a row under the user's hand (P5). The
+    /// `SyncCoordinator` (added once the CloudKit container exists) calls this.
+    func applyRemoteChanges(upserts: [TodoItem] = [], deletions: [UUID] = []) {
+        for item in upserts {
+            pendingRemoteDeletes.remove(item.id)
+            pendingRemoteUpserts[item.id] = item
+        }
+        for id in deletions {
+            pendingRemoteUpserts[id] = nil
+            pendingRemoteDeletes.insert(id)
+        }
+        commitPendingRemote()
+    }
+
+    /// Apply buffered remote changes — but only when nothing is being touched.
+    func commitPendingRemote() {
+        guard interacting.isEmpty,
+              !pendingRemoteUpserts.isEmpty || !pendingRemoteDeletes.isEmpty else { return }
+        var changed = false
+        for (id, remote) in pendingRemoteUpserts {
+            if let i = items.firstIndex(where: { $0.id == id }) {
+                guard remote.modifiedAt > items[i].modifiedAt else { continue }   // LWW
+                let localImportance = items[i].importance   // importance is local-only
+                items[i] = remote
+                items[i].importance = localImportance
+                changed = true
+            } else {
+                items.append(remote)   // a new task from another device; this device ranks it
+                changed = true
+            }
+        }
+        for id in pendingRemoteDeletes where items.contains(where: { $0.id == id }) {
+            items.removeAll { $0.id == id }
+            changed = true
+        }
+        pendingRemoteUpserts.removeAll()
+        pendingRemoteDeletes.removeAll()
+        if changed { save(); scheduleRank() }
     }
 
     /// Resolve which ranker to use. The Keychain read can surface a blocking

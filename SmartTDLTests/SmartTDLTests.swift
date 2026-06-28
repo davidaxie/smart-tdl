@@ -320,3 +320,69 @@ final class CloudKitMappingTests: XCTestCase {
         XCTAssertNil(TodoItem(record: badName))
     }
 }
+
+// MARK: - Remote sync merges: LWW + local-importance preservation + safe-moment (P5)
+
+@MainActor
+final class RemoteMergeTests: XCTestCase {
+    private var today: Date { Calendar.current.startOfDay(for: Date()) }
+
+    func testNewerRemoteWinsAndPreservesLocalImportance() {
+        var local = TodoItem(title: "A", day: today, sortIndex: 1)
+        local.modifiedAt = Date(timeIntervalSinceNow: -100)
+        local.importance = 0.7
+        let store = TaskStore(testItems: [local])
+
+        var remote = local
+        remote.title = "A edited on another device"
+        remote.importance = nil                 // came from CloudKit (importance not synced)
+        remote.modifiedAt = Date()              // newer
+        store.applyRemoteChanges(upserts: [remote])
+
+        XCTAssertEqual(store.item(local.id)?.title, "A edited on another device", "newer remote wins (LWW)")
+        XCTAssertEqual(store.item(local.id)?.importance, 0.7, "local importance is preserved")
+    }
+
+    func testOlderRemoteIsIgnored() {
+        var local = TodoItem(title: "A", day: today, sortIndex: 1)
+        local.modifiedAt = Date()
+        let store = TaskStore(testItems: [local])
+
+        var remote = local
+        remote.title = "stale"
+        remote.modifiedAt = Date(timeIntervalSinceNow: -100)   // older
+        store.applyRemoteChanges(upserts: [remote])
+
+        XCTAssertEqual(store.item(local.id)?.title, "A", "older remote loses (LWW)")
+    }
+
+    func testRemoteUpsertForNewIDAppends() {
+        let store = TaskStore(testItems: [])
+        let remote = TodoItem(title: "from the phone", day: today, sortIndex: 1)
+        store.applyRemoteChanges(upserts: [remote])
+        XCTAssertEqual(store.item(remote.id)?.title, "from the phone")
+    }
+
+    func testRemoteDeletionRemovesTask() {
+        let local = TodoItem(title: "A", day: today, sortIndex: 1)
+        let store = TaskStore(testItems: [local])
+        store.applyRemoteChanges(deletions: [local.id])
+        XCTAssertNil(store.item(local.id))
+    }
+
+    func testRemoteChangesBufferWhileInteracting() {
+        var local = TodoItem(title: "A", day: today, sortIndex: 1)
+        local.modifiedAt = Date(timeIntervalSinceNow: -100)
+        let store = TaskStore(testItems: [local])
+
+        store.setInteracting(local.id, true)
+        var remote = local
+        remote.title = "edited"
+        remote.modifiedAt = Date()
+        store.applyRemoteChanges(upserts: [remote])
+        XCTAssertEqual(store.item(local.id)?.title, "A", "a remote change must not apply under the hand (P5)")
+
+        store.setInteracting(local.id, false)   // safe moment → flush
+        XCTAssertEqual(store.item(local.id)?.title, "edited", "buffered remote change applies once interaction ends")
+    }
+}
