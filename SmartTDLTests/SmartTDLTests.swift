@@ -225,3 +225,45 @@ final class StressTests: XCTestCase {
         }
     }
 }
+
+// MARK: - modifiedAt: the last-writer-wins sync timestamp (docs/sync-plan.md §4)
+
+@MainActor
+final class ModifiedAtTests: XCTestCase {
+    private var today: Date { Calendar.current.startOfDay(for: Date()) }
+
+    func testLegacyFileBackfillsModifiedAtFromCreatedAt() throws {
+        // Old tasks.json has createdAt but no modifiedAt.
+        let json = Data("""
+        {"id":"7E0F0E2A-0000-0000-0000-000000000002","title":"Old","isCompleted":false,"day":0,"sortIndex":1,"createdAt":12345}
+        """.utf8)
+        let item = try JSONDecoder().decode(TodoItem.self, from: json)
+        XCTAssertEqual(item.modifiedAt, item.createdAt, "missing modifiedAt back-fills from createdAt")
+    }
+
+    func testNewItemModifiedAtEqualsCreatedAt() {
+        let t = TodoItem(title: "New", day: today, sortIndex: 1)
+        XCTAssertEqual(t.modifiedAt, t.createdAt)
+    }
+
+    func testContentMutationBumpsModifiedAt() {
+        var t = TodoItem(title: "A", day: today, sortIndex: 1)
+        t.modifiedAt = Date(timeIntervalSinceNow: -3600)   // an hour ago
+        let store = TaskStore(testItems: [t])
+        let before = store.item(t.id)!.modifiedAt
+        store.togglePin(store.item(t.id)!)
+        XCTAssertGreaterThan(store.item(t.id)!.modifiedAt, before, "a content change must bump modifiedAt")
+    }
+
+    func testRankCommitDoesNotBumpModifiedAt() {
+        var t = TodoItem(title: "A", day: today, sortIndex: 1)
+        t.modifiedAt = Date(timeIntervalSinceNow: -3600)
+        let store = TaskStore(testItems: [t])
+        let before = store.item(t.id)!.modifiedAt
+        store._testSetPendingScores([t.id: 0.9])
+        store.commitPendingRank()
+        XCTAssertEqual(store.item(t.id)?.importance, 0.9, "importance is applied")
+        XCTAssertEqual(store.item(t.id)!.modifiedAt, before,
+                       "an importance/rank commit must NOT bump modifiedAt (importance is local, not synced)")
+    }
+}

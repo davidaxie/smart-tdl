@@ -66,6 +66,10 @@ struct TodoItem: Identifiable, Codable, Hashable {
     var day: Date
     var sortIndex: Double
     var createdAt: Date = Date()
+    /// Bumped on every user-meaningful content change (title, day, completion,
+    /// pin, list, recurrence) — but NOT on importance/rank commits, which are
+    /// local-only. Drives last-writer-wins sync. Defaults to `createdAt`.
+    var modifiedAt: Date = Date()
     var importance: Double? = nil
     var isPinned: Bool = false
     var recurrence: Recurrence? = nil
@@ -82,10 +86,11 @@ struct TodoItem: Identifiable, Codable, Hashable {
         self.isCompleted = isCompleted
         self.recurrence = recurrence
         self.list = list
+        self.modifiedAt = self.createdAt
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, isCompleted, day, sortIndex, createdAt, importance, isPinned, recurrence, list
+        case id, title, isCompleted, day, sortIndex, createdAt, modifiedAt, importance, isPinned, recurrence, list
     }
 
     // Resilient decoding so older saved files (without pin/recurrence/list) still load.
@@ -97,6 +102,7 @@ struct TodoItem: Identifiable, Codable, Hashable {
         day = try c.decode(Date.self, forKey: .day)
         sortIndex = try c.decodeIfPresent(Double.self, forKey: .sortIndex) ?? 0
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        modifiedAt = try c.decodeIfPresent(Date.self, forKey: .modifiedAt) ?? createdAt
         importance = try c.decodeIfPresent(Double.self, forKey: .importance)
         isPinned = try c.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
         recurrence = try c.decodeIfPresent(Recurrence.self, forKey: .recurrence)

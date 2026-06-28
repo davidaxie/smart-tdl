@@ -61,6 +61,7 @@ final class TaskStore {
         var changed = false
         for i in items.indices where items[i].list == nil && !items[i].isCompleted && calendar.isDate(items[i].day, inSameDayAs: today) {
             items[i].day = tomorrow
+            items[i].modifiedAt = Date()
             changed = true
         }
         if changed { save(); scheduleRank(); commitPendingRank() }
@@ -182,6 +183,7 @@ final class TaskStore {
         items[i].importance = nil
         let nextIndex = (items.filter { $0.list == list }.map(\.sortIndex).max() ?? 0) + 1
         items[i].sortIndex = nextIndex
+        items[i].modifiedAt = Date()
         save()
         commitPendingRank()
     }
@@ -191,6 +193,7 @@ final class TaskStore {
         let prev = items[i].isCompleted
         let nowCompleting = !prev
         items[i].isCompleted = nowCompleting
+        items[i].modifiedAt = Date()
 
         // Recurring task just completed → spawn the next occurrence.
         var spawnedID: UUID?
@@ -210,6 +213,7 @@ final class TaskStore {
     func togglePin(_ item: TodoItem) {
         guard let i = items.firstIndex(where: { $0.id == item.id }) else { return }
         items[i].isPinned.toggle()
+        items[i].modifiedAt = Date()
         save()
         commitPendingRank()
     }
@@ -223,6 +227,7 @@ final class TaskStore {
         } else if items[i].title != t {
             items[i].title = t
             items[i].importance = nil   // re-rank since the text changed
+            items[i].modifiedAt = Date()
             scheduleRank()
         }
         save()
@@ -242,6 +247,7 @@ final class TaskStore {
         pushUndo(.move(item.id, items[i].day))
         items[i].day = calendar.startOfDay(for: day)
         items[i].list = nil   // scheduling onto a day un-files it from any list
+        items[i].modifiedAt = Date()
         save()
         scheduleRank()
         commitPendingRank()
@@ -257,12 +263,12 @@ final class TaskStore {
         guard let step = undoStack.popLast() else { return }
         switch step {
         case .toggle(let id, let prev, let spawned):
-            if let i = items.firstIndex(where: { $0.id == id }) { items[i].isCompleted = prev }
+            if let i = items.firstIndex(where: { $0.id == id }) { items[i].isCompleted = prev; items[i].modifiedAt = Date() }
             if let spawned { items.removeAll { $0.id == spawned } }
         case .delete(let item):
             if !items.contains(where: { $0.id == item.id }) { items.append(item) }
         case .move(let id, let prevDay):
-            if let i = items.firstIndex(where: { $0.id == id }) { items[i].day = prevDay }
+            if let i = items.firstIndex(where: { $0.id == id }) { items[i].day = prevDay; items[i].modifiedAt = Date() }
         }
         save()
     }
@@ -278,6 +284,7 @@ final class TaskStore {
         var changed = false
         for i in items.indices where items[i].list == nil && !items[i].isCompleted && items[i].day < today {
             items[i].day = today
+            items[i].modifiedAt = Date()
             changed = true
         }
         if changed { save() }
