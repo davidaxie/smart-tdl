@@ -79,6 +79,23 @@ final class TaskStore {
         refreshRanker()
     }
 
+    #if DEBUG
+    /// Deterministic, disk-free store for tests: known items, a throwaway save URL,
+    /// no load / roll-forward / ranker resolution. Stays on the local heuristic with
+    /// `usingAI == false` until a test opts in via the seams below.
+    init(testItems: [TodoItem]) {
+        saveURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SmartTDLTest-\(UUID().uuidString).json")
+        context = ""
+        items = testItems
+    }
+
+    /// Test seam: inject the buffered importance scores `rerank` would normally write.
+    func _testSetPendingScores(_ scores: [UUID: Double]) { pendingScores = scores }
+    /// Test seam: pretend a real AI ranker is active (gates the honest-confidence hedge).
+    func _testSetUsingAI(_ value: Bool) { usingAI = value }
+    #endif
+
     // MARK: - Days & queries
 
     /// Today plus the next six days.

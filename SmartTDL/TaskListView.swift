@@ -283,7 +283,6 @@ struct AddRow: View {
 struct QuietControls: View {
     var onCapture: () -> Void
     var onFocus: () -> Void
-    var onSettings: () -> Void
     @AppStorage("smarttdl.appearance") private var appearance = Appearance.system.rawValue
     @State private var hovering = false
 
@@ -297,7 +296,16 @@ struct QuietControls: View {
             }
             icon("plus", help: "Quick capture (⌘K)", action: onCapture)
             icon("scope", help: "Focus now (⌘J)", action: onFocus)
-            icon("slider.horizontal.3", help: "Settings", action: onSettings)
+            // Opens the native Settings scene (⌘,) instead of an in-window sheet.
+            SettingsLink {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.inkSecondary)
+                    .frame(width: 26, height: 26)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Settings (⌘,)")
         }
         .padding(.top, 16)
         .padding(.trailing, Space.l)
@@ -914,6 +922,9 @@ private struct MacRow: View {
                     .focused($fieldFocused)
                     .onSubmit(commit)
                     .onExitCommand(perform: commit)
+                    // onExitCommand fires unreliably inside the week board's nested
+                    // scroll views, so also catch Escape directly on the field.
+                    .onKeyPress(.escape) { commit(); return .handled }
             } else {
                 Text(item.title.isEmpty ? " " : item.title)
                     .font(rowFont)
@@ -1298,14 +1309,22 @@ struct WeekBoardView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("smarttdl.weekDays") private var weekDays = 7
     @FocusState private var focusedDay: Date?
+    @FocusState private var boardFocused: Bool
+    @FocusState private var searchFocused: Bool
     @State private var editingID: UUID?
+    @State private var selectedID: UUID?
+    @State private var query = ""
+    @State private var searchActive = false
 
     private let gap: CGFloat = Space.m
     private let margin: CGFloat = Space.section
 
+    private var today: Date { Calendar.current.startOfDay(for: Date()) }
+    private var visibleWindow: [Date] { Array(store.visibleDays.prefix(max(1, weekDays))) }
+
     var body: some View {
         GeometryReader { geo in
-            let days = Array(store.visibleDays.prefix(max(1, weekDays)))
+            let days = visibleWindow
             let dayCount = max(1, days.count)
             // Size lanes so the chosen days fill the viewport; the undated list
             // lanes trail to the right and are reached by scrolling.
@@ -1316,7 +1335,13 @@ struct WeekBoardView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: gap) {
                     ForEach(days, id: \.self) { day in
-                        DayColumn(day: day, focusBinding: $focusedDay, editingID: $editingID)
+                        DayColumn(day: day,
+                                  query: query,
+                                  focusBinding: $focusedDay,
+                                  editingID: $editingID,
+                                  selectedID: $selectedID,
+                                  onSelectRow: selectRow,
+                                  refocusBoard: reclaimFocus)
                             .frame(width: laneW)
                     }
                     ForEach(TaskStore.listNames, id: \.self) { name in
@@ -1331,23 +1356,214 @@ struct WeekBoardView: View {
             }
             .scrollContentBackground(.hidden)
             .animation(reduceMotion ? nil : Motion.settle, value: store.items)
-            .onChange(of: store.newTaskToken) { _, _ in
-                focusedDay = Calendar.current.startOfDay(for: Date())
+            .focusable()
+            .focusEffectDisabled()
+            .focused($boardFocused)
+            .onKeyPress { press in handleKey(press) }
+            .onAppear { focusBoard() }
+            .onChange(of: store.newTaskToken) { _, _ in focusedDay = today }
+            .onChange(of: store.refocusToken) { _, _ in focusBoard() }
+            .onChange(of: store.findToken) { _, _ in searchActive = true; searchFocused = true }
+            // When an edit ends (editingID → nil), the text field is still
+            // resigning first responder, so setting boardFocused synchronously is
+            // dropped. Reclaim on the next tick so keyboard nav resumes.
+            .onChange(of: editingID) { _, id in if id == nil { reclaimFocus() } }
+            .overlay(alignment: .top) {
+                if searchActive { searchBar }
             }
         }
+    }
+
+    // MARK: search (⌘F) — a quiet overlay filter, not a new lane
+
+    private var searchBar: some View {
+        HStack(spacing: Space.s) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12)).foregroundStyle(Color.inkSecondary)
+            TextField("Search tasks", text: $query)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .foregroundStyle(Color.inkPrimary)
+                .frame(width: 200)
+                .focused($searchFocused)
+                .onExitCommand { closeSearch() }
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(Color.inkTertiary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, Space.m).padding(.vertical, 7)
+        .background(Capsule().fill(Color.surfacePool))
+        .overlay(Capsule().stroke(Color.hairline, lineWidth: 1))
+        .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
+        .padding(.top, 14)
+    }
+
+    private func closeSearch() {
+        query = ""
+        searchActive = false
+        searchFocused = false
+        reclaimFocus()
+    }
+
+    // MARK: selection & focus
+
+    private func selectRow(_ id: UUID) {
+        selectedID = id
+        boardFocused = true
+    }
+
+    /// Re-grab key focus after a text field (row edit or add row) resigns. Must be
+    /// deferred: setting the FocusState while the field is still resigning is
+    /// ignored, leaving the board unfocused and keyboard nav dead. Through the
+    /// board's deeply-nested scroll views one runloop tick isn't enough, so give
+    /// the field a short beat to fully resign first responder before reclaiming.
+    private func reclaimFocus() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { boardFocused = true }
+    }
+
+    private func focusBoard() {
+        if selectedID == nil || store.item(selectedID!) == nil {
+            selectedID = store.nextFocusTask()?.id
+        }
+        boardFocused = true
+    }
+
+    // MARK: keyboard layer (ported from MacListView; linear nav over the visible day lanes)
+
+    private func filtered(_ items: [TodoItem]) -> [TodoItem] {
+        query.isEmpty ? items : items.filter { $0.title.localizedCaseInsensitiveContains(query) }
+    }
+
+    private func navOrder() -> [TodoItem] {
+        visibleWindow.flatMap { filtered(store.openTasks(on: $0)) + filtered(store.completedTasks(on: $0)) }
+    }
+
+    private func handleKey(_ press: KeyPress) -> KeyPress.Result {
+        // Bail while any text field is active (a row being edited or an add field
+        // focused) so letters like t/m/e/p/x type instead of firing commands — the
+        // documented landmine. The focused field owns Escape itself (it commits via
+        // its own .onKeyPress(.escape)); a competing board-level Escape handler here
+        // races with it, so we deliberately don't add one.
+        guard editingID == nil, focusedDay == nil, !searchFocused else { return .ignored }
+        let order = navOrder()
+
+        switch press.key {
+        case .upArrow: move(-1, order); return .handled
+        case .downArrow: move(1, order); return .handled
+        case .return: beginEdit(); return .handled
+        case .space: complete(); return .handled
+        case .delete: deleteSelected(order); return .handled
+        case .escape:
+            if searchActive { closeSearch() } else { selectedID = nil }
+            return .handled
+        default: break
+        }
+
+        if press.modifiers.contains(.command) {
+            switch press.characters {
+            case "]": nudge(1); return .handled
+            case "[": nudge(-1); return .handled
+            default: return .ignored
+            }
+        }
+
+        switch press.characters {
+        case "j": move(1, order); return .handled
+        case "k": move(-1, order); return .handled
+        case "x": complete(); return .handled
+        case "e": beginEdit(); return .handled
+        case "p": pinSelected(); return .handled
+        case "#": deleteSelected(order); return .handled
+        case "o", "a": focusedDay = selectedDay() ?? today; return .handled
+        case "t": deferSelected(to: today); return .handled
+        case "m": deferSelected(to: dayOffset(1)); return .handled
+        case "]": nudge(1); return .handled
+        case "[": nudge(-1); return .handled
+        default: break
+        }
+
+        if let n = Int(press.characters), (1...7).contains(n), n - 1 < store.visibleDays.count {
+            deferSelected(to: store.visibleDays[n - 1])
+            return .handled
+        }
+        return .ignored
+    }
+
+    private func move(_ delta: Int, _ order: [TodoItem]) {
+        guard !order.isEmpty else { return }
+        if let id = selectedID, let idx = order.firstIndex(where: { $0.id == id }) {
+            selectedID = order[max(0, min(order.count - 1, idx + delta))].id
+        } else {
+            selectedID = delta >= 0 ? order.first?.id : order.last?.id
+        }
+    }
+
+    private func complete() {
+        guard let id = selectedID, let it = store.item(id) else { return }
+        // Compute the next open task BEFORE the toggle reshuffles this one into the
+        // completed pool, so holding space/x sweeps a lane without stranding (AC-KB-4).
+        if !it.isCompleted {
+            let openOrder = visibleWindow.flatMap { filtered(store.openTasks(on: $0)) }
+            if let idx = openOrder.firstIndex(where: { $0.id == id }), idx + 1 < openOrder.count {
+                let next = openOrder[idx + 1].id
+                store.toggle(it)
+                selectedID = next
+                return
+            }
+        }
+        store.toggle(it)
+    }
+
+    private func beginEdit() { if selectedID != nil { editingID = selectedID } }
+    private func pinSelected() { if let id = selectedID, let it = store.item(id) { store.togglePin(it) } }
+
+    private func deleteSelected(_ order: [TodoItem]) {
+        guard let id = selectedID, let it = store.item(id) else { return }
+        if let idx = order.firstIndex(where: { $0.id == id }) {
+            let nextIdx = idx + 1 < order.count ? idx + 1 : idx - 1
+            selectedID = (nextIdx >= 0 && nextIdx < order.count) ? order[nextIdx].id : nil
+        }
+        store.delete(it)
+    }
+
+    private func selectedDay() -> Date? { selectedID.flatMap { store.item($0)?.day } }
+    private func dayOffset(_ n: Int) -> Date { Calendar.current.date(byAdding: .day, value: n, to: today) ?? today }
+    private func deferSelected(to day: Date) {
+        if let id = selectedID, let it = store.item(id) { store.move(it, to: day) }
+    }
+    private func nudge(_ delta: Int) {
+        guard let id = selectedID, let it = store.item(id),
+              let target = Calendar.current.date(byAdding: .day, value: delta, to: it.day) else { return }
+        if target >= today { store.move(it, to: target) }
     }
 }
 
 private struct DayColumn: View {
     @Environment(TaskStore.self) private var store
     let day: Date
+    var query: String = ""
     var focusBinding: FocusState<Date?>.Binding
     @Binding var editingID: UUID?
+    @Binding var selectedID: UUID?
+    var onSelectRow: (UUID) -> Void
+    var refocusBoard: () -> Void
+
+    private func filtered(_ items: [TodoItem]) -> [TodoItem] {
+        query.isEmpty ? items : items.filter { $0.title.localizedCaseInsensitiveContains(query) }
+    }
 
     var body: some View {
-        let open = store.openTasks(on: day)
-        let done = store.completedTasks(on: day)
+        let searching = !query.isEmpty
+        let open = filtered(store.openTasks(on: day))
+        let done = filtered(store.completedTasks(on: day))
         let isToday = Calendar.current.isDateInToday(day)
+        // Honest-confidence hedge (P6, AI-only): when the ranker can't separate
+        // the lane's top two tasks, flatten the ramp and soften the crown instead
+        // of asserting a false #1. Gated on real AI inside `topScoresClustered`.
+        let flattened = store.topScoresClustered(on: day)
 
         VStack(alignment: .leading, spacing: 0) {
             ColumnMasthead(day: day, isToday: isToday)
@@ -1355,8 +1571,8 @@ private struct DayColumn: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 1) {
-                    if isToday, !open.isEmpty {
-                        Text("NOW")
+                    if isToday, !open.isEmpty, !searching {
+                        Text(flattened ? "A FEW THINGS MATTER" : "NOW")
                             .font(.system(size: 10, weight: .semibold)).tracking(3)
                             .foregroundStyle(Color.accentInk)
                             .padding(.leading, Space.s)
@@ -1364,17 +1580,19 @@ private struct DayColumn: View {
                     }
 
                     ForEach(Array(open.enumerated()), id: \.element.id) { idx, item in
-                        weekRow(item, rank: idx)
+                        weekRow(item, rank: idx, flattened: flattened)
                     }
 
-                    if open.isEmpty && done.isEmpty && isToday {
+                    if open.isEmpty && done.isEmpty && isToday && !searching {
                         Text("A clear day.")
                             .font(.system(.subheadline, design: .serif))
                             .foregroundStyle(Color.inkTertiary)
                             .padding(.vertical, Space.s).padding(.leading, Space.s)
                     }
 
-                    AddRow(day: day, focusBinding: focusBinding)
+                    if !searching {
+                        AddRow(day: day, focusBinding: focusBinding, onEscape: refocusBoard)
+                    }
 
                     if !done.isEmpty {
                         CompletedTrayHeader(count: done.count)
@@ -1401,16 +1619,16 @@ private struct DayColumn: View {
         }
     }
 
-    private func weekRow(_ item: TodoItem, rank: Int) -> some View {
-        let g = Gravity.column(rank: rank)
+    private func weekRow(_ item: TodoItem, rank: Int, flattened: Bool = false) -> some View {
+        let g = Gravity.column(rank: rank, flattened: flattened)
         return MacRow(item: item,
                       kind: .body(size: g.size, weight: g.weight, color: g.color),
-                      isSelected: false,
+                      isSelected: item.id == selectedID,
                       isEditing: item.id == editingID,
                       moveTargets: store.visibleDays,
-                      onSelect: { },
-                      onBeginEdit: { editingID = item.id },
-                      onEndEdit: { editingID = nil })
+                      onSelect: { onSelectRow(item.id) },
+                      onBeginEdit: { selectedID = item.id; editingID = item.id },
+                      onEndEdit: { editingID = nil; refocusBoard() })
     }
 }
 

@@ -42,6 +42,12 @@ struct SmartTDLApp: App {
                 .environment(store)
         }
         .menuBarExtraStyle(.window)
+
+        // Native Settings scene → ⌘, opens it from the app menu (no in-window sheet).
+        Settings {
+            SettingsView()
+                .environment(store)
+        }
         #endif
     }
 }

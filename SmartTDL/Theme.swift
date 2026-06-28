@@ -169,7 +169,18 @@ enum Gravity {
 
     /// Week-board columns: a deliberately PRONOUNCED ramp so the AI's #1 is
     /// unmistakably the heaviest — size and weight and ink all step together.
-    static func column(rank: Int) -> (size: CGFloat, weight: Font.Weight, color: Color) {
+    /// When `flattened` (the honest-confidence hedge, P6: the ranker can't
+    /// confidently separate the top tasks), the ramp compresses so rank 0 and 1
+    /// read as near-peers and no single row is crowned as a false #1.
+    static func column(rank: Int, flattened: Bool = false) -> (size: CGFloat, weight: Font.Weight, color: Color) {
+        if flattened {
+            switch rank {
+            case 0, 1: return (16, .medium, .inkBody)
+            case 2: return (14.5, .regular, .inkBody)
+            case 3: return (13.5, .regular, .inkSecondary)
+            default: return (13, .regular, .inkSecondary)
+            }
+        }
         switch rank {
         case 0: return (20, .semibold, .inkPrimary)
         case 1: return (16, .medium, .inkBody)

@@ -14,12 +14,12 @@ struct ContentView: View {
         shell
             .tint(.accentInk)
             .preferredColorScheme(Appearance(rawValue: appearance)?.colorScheme)
+            #if os(iOS)
+            // iOS has no Settings scene, so it keeps the in-app sheet.
             .sheet(isPresented: $showSettings) {
                 SettingsView().environment(store)
             }
-            .onChange(of: showSettings) { _, shown in
-                if !shown { store.requestListRefocus() }
-            }
+            #endif
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { store.commitPendingRank() }
             }
@@ -35,8 +35,7 @@ struct ContentView: View {
         }
         .overlay(alignment: .topTrailing) {
             QuietControls(onCapture: { showCommandBar = true },
-                          onFocus: { showFocusMode = true },
-                          onSettings: { showSettings = true })
+                          onFocus: { showFocusMode = true })
         }
         .overlay {
             if showCommandBar {

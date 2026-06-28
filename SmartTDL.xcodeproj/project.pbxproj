@@ -19,7 +19,18 @@
 		BF0000000000000000000008 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000008 /* Theme.swift */; };
 		BF0000000000000000000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000009 /* Assets.xcassets */; };
 		BF0000000000000000000014 /* PlayfairDisplay.ttf in Resources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000014 /* PlayfairDisplay.ttf */; };
+		BF00000000000000000000A1 /* SmartTDLTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA00000000000000000000A1 /* SmartTDLTests.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		CC00000000000000000000A1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CC0000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = EE0000000000000000000001;
+			remoteInfo = SmartTDL;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		FA0000000000000000000001 /* SmartTDLApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartTDLApp.swift; sourceTree = "<group>"; };
@@ -35,10 +46,19 @@
 		FA0000000000000000000009 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		FA0000000000000000000014 /* PlayfairDisplay.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = PlayfairDisplay.ttf; sourceTree = "<group>"; };
 		FA0000000000000000000010 /* SmartTDL.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SmartTDL.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FA00000000000000000000A1 /* SmartTDLTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartTDLTests.swift; sourceTree = "<group>"; };
+		FA00000000000000000000A0 /* SmartTDLTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SmartTDLTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		FB0000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FB00000000000000000000A2 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -52,6 +72,7 @@
 			isa = PBXGroup;
 			children = (
 				AD0000000000000000000002 /* SmartTDL */,
+				AD00000000000000000000A1 /* SmartTDLTests */,
 				AD0000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -79,8 +100,17 @@
 			isa = PBXGroup;
 			children = (
 				FA0000000000000000000010 /* SmartTDL.app */,
+				FA00000000000000000000A0 /* SmartTDLTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		AD00000000000000000000A1 /* SmartTDLTests */ = {
+			isa = PBXGroup;
+			children = (
+				FA00000000000000000000A1 /* SmartTDLTests.swift */,
+			);
+			path = SmartTDLTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -103,6 +133,23 @@
 			productReference = FA0000000000000000000010 /* SmartTDL.app */;
 			productType = "com.apple.product-type.application";
 		};
+		EE00000000000000000000A1 /* SmartTDLTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AC00000000000000000000A1 /* Build configuration list for PBXNativeTarget "SmartTDLTests" */;
+			buildPhases = (
+				FB00000000000000000000A1 /* Sources */,
+				FB00000000000000000000A2 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				DD00000000000000000000A1 /* PBXTargetDependency */,
+			);
+			name = SmartTDLTests;
+			productName = SmartTDLTests;
+			productReference = FA00000000000000000000A0 /* SmartTDLTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -115,6 +162,10 @@
 				TargetAttributes = {
 					EE0000000000000000000001 = {
 						CreatedOnToolsVersion = 26.0;
+					};
+					EE00000000000000000000A1 = {
+						CreatedOnToolsVersion = 26.0;
+						TestTargetID = EE0000000000000000000001;
 					};
 				};
 			};
@@ -132,6 +183,7 @@
 			projectRoot = "";
 			targets = (
 				EE0000000000000000000001 /* SmartTDL */,
+				EE00000000000000000000A1 /* SmartTDLTests */,
 			);
 		};
 /* End PBXProject section */
@@ -166,7 +218,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FB00000000000000000000A1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BF00000000000000000000A1 /* SmartTDLTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		DD00000000000000000000A1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = EE0000000000000000000001 /* SmartTDL */;
+			targetProxy = CC00000000000000000000A1 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		DC0000000000000000000001 /* Debug */ = {
@@ -357,6 +425,46 @@
 			};
 			name = Release;
 		};
+		DC00000000000000000000A1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.smarttdl.SmartTDLTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SmartTDL.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SmartTDL";
+			};
+			name = Debug;
+		};
+		DC00000000000000000000A2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.smarttdl.SmartTDLTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SmartTDL.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SmartTDL";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -374,6 +482,15 @@
 			buildConfigurations = (
 				DC0000000000000000000003 /* Debug */,
 				DC0000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AC00000000000000000000A1 /* Build configuration list for PBXNativeTarget "SmartTDLTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DC00000000000000000000A1 /* Debug */,
+				DC00000000000000000000A2 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
