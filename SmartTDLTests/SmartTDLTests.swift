@@ -386,3 +386,53 @@ final class RemoteMergeTests: XCTestCase {
         XCTAssertEqual(store.item(local.id)?.title, "edited", "buffered remote change applies once interaction ends")
     }
 }
+
+// MARK: - TimeContext: free-time interval math (pain #4, PRD §7.4)
+
+final class TimeContextTests: XCTestCase {
+    private let base = Date(timeIntervalSinceReferenceDate: 0)
+    private func iv(_ startHour: Double, _ endHour: Double) -> DateInterval {
+        DateInterval(start: base.addingTimeInterval(startHour * 3600), end: base.addingTimeInterval(endHour * 3600))
+    }
+    private func window(_ startHour: Double, _ endHour: Double) -> DateInterval { iv(startHour, endHour) }
+
+    func testNoBusyMeansWholeWindowFree() {
+        XCTAssertEqual(TimeContext.freeSeconds(in: window(0, 8), busy: []), 8 * 3600, accuracy: 1)
+    }
+
+    func testBusyTimeIsSubtracted() {
+        let busy = [iv(1, 2), iv(3, 4)]   // 2h busy in an 8h window
+        XCTAssertEqual(TimeContext.freeSeconds(in: window(0, 8), busy: busy), 6 * 3600, accuracy: 1)
+    }
+
+    func testOverlappingBusyIntervalsMerge() {
+        let busy = [iv(1, 3), iv(2, 4)]   // overlap → busy 1–4 = 3h, not 4h
+        XCTAssertEqual(TimeContext.freeSeconds(in: window(0, 8), busy: busy), 5 * 3600, accuracy: 1)
+    }
+
+    func testBusyClampedToWindow() {
+        let busy = [iv(0, 3)]             // 0–3 clamped to a 2–6 window = 1h busy
+        XCTAssertEqual(TimeContext.freeSeconds(in: window(2, 6), busy: busy), 3 * 3600, accuracy: 1)
+    }
+
+    func testFullyBookedIsZero() {
+        let busy = [iv(-1, 5)]            // covers the whole 0–4 window
+        XCTAssertEqual(TimeContext.freeSeconds(in: window(0, 4), busy: busy), 0, accuracy: 1)
+    }
+
+    func testNextEventStart() {
+        let events = [iv(2, 3), iv(5, 6)]
+        XCTAssertEqual(TimeContext.nextEventStart(after: base.addingTimeInterval(3600), in: events),
+                       base.addingTimeInterval(2 * 3600))
+        XCTAssertNil(TimeContext.nextEventStart(after: base.addingTimeInterval(7 * 3600), in: events))
+    }
+
+    func testContextLinePhrasing() {
+        XCTAssertEqual(TimeContext.contextLine(freeSeconds: 0, nextEvent: nil)?.contains("almost no free time"), true)
+        XCTAssertEqual(TimeContext.contextLine(freeSeconds: 2 * 3600, nextEvent: nil)?.contains("2 free hours"), true)
+        XCTAssertEqual(TimeContext.contextLine(freeSeconds: 2.5 * 3600, nextEvent: nil)?.contains("2.5 free hours"), true)
+        let one = TimeContext.contextLine(freeSeconds: 3600, nextEvent: nil)
+        XCTAssertEqual(one?.contains("1 free hour "), true, "singular phrasing")
+        XCTAssertEqual(one?.contains("1 free hours"), false)
+    }
+}

@@ -17,6 +17,7 @@
 		BF0000000000000000000012 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000012 /* SettingsView.swift */; };
 		BF0000000000000000000013 /* DateParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000013 /* DateParser.swift */; };
 		BF0000000000000000000008 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000008 /* Theme.swift */; };
+		BF0000000000000000000015 /* TimeContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000015 /* TimeContext.swift */; };
 		BF0000000000000000000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000009 /* Assets.xcassets */; };
 		BF0000000000000000000014 /* PlayfairDisplay.ttf in Resources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000014 /* PlayfairDisplay.ttf */; };
 		BF00000000000000000000A1 /* SmartTDLTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA00000000000000000000A1 /* SmartTDLTests.swift */; };
@@ -43,6 +44,7 @@
 		FA0000000000000000000012 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		FA0000000000000000000013 /* DateParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateParser.swift; sourceTree = "<group>"; };
 		FA0000000000000000000008 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		FA0000000000000000000015 /* TimeContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeContext.swift; sourceTree = "<group>"; };
 		FA0000000000000000000009 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		FA0000000000000000000014 /* PlayfairDisplay.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = PlayfairDisplay.ttf; sourceTree = "<group>"; };
 		FA0000000000000000000010 /* SmartTDL.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SmartTDL.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -90,6 +92,7 @@
 				FA0000000000000000000013 /* DateParser.swift */,
 				FA0000000000000000000003 /* TodoItem.swift */,
 				FA0000000000000000000008 /* Theme.swift */,
+				FA0000000000000000000015 /* TimeContext.swift */,
 				FA0000000000000000000009 /* Assets.xcassets */,
 				FA0000000000000000000014 /* PlayfairDisplay.ttf */,
 			);
@@ -215,6 +218,7 @@
 				BF0000000000000000000004 /* TaskStore.swift in Sources */,
 				BF0000000000000000000003 /* TodoItem.swift in Sources */,
 				BF0000000000000000000008 /* Theme.swift in Sources */,
+				BF0000000000000000000015 /* TimeContext.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
