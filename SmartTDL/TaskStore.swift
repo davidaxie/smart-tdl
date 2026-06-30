@@ -397,11 +397,18 @@ final class TaskStore {
         }
     }
 
+    /// Composes the ranker's effective context from the user's note + connectors
+    /// (the calendar time-layer today; Gmail/etc. later). Lazy so unit tests that
+    /// never rerank don't spin up EventKit. Connectors stay inert until the user
+    /// opts in, so this never prompts for access on its own.
+    @ObservationIgnored private lazy var contextAggregator = ContextAggregator(connectors: [TimeContextProvider()])
+
     private func rerank() async {
         let visible = Set(visibleDays)
         let toRank = items.filter { $0.list == nil && !$0.isCompleted && visible.contains($0.day) }
         guard !toRank.isEmpty else { return }
-        guard let scores = try? await ranker.rank(toRank, context: context) else { return }
+        let effectiveContext = await contextAggregator.compose(userContext: context)
+        guard let scores = try? await ranker.rank(toRank, context: effectiveContext) else { return }
         pendingScores = scores
         scheduleIdleCommit()
     }

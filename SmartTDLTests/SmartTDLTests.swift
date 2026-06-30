@@ -436,3 +436,34 @@ final class TimeContextTests: XCTestCase {
         XCTAssertEqual(one?.contains("1 free hours"), false)
     }
 }
+
+// MARK: - ContextAggregator: composing the ranker's context from connectors (PRD §7.5)
+
+final class ContextAggregatorTests: XCTestCase {
+    private struct Stub: ContextConnector {
+        let value: String?
+        func fragment() async -> String? { value }
+    }
+
+    func testComposesUserContextThenFragments() async {
+        let agg = ContextAggregator(connectors: [Stub(value: "About 2 free hours left."),
+                                                 Stub(value: nil),
+                                                 Stub(value: "   ")])
+        let out = await agg.compose(userContext: "writing the board deck")
+        XCTAssertTrue(out.hasPrefix("writing the board deck"), "the user's own note comes first")
+        XCTAssertTrue(out.contains("About 2 free hours left."))
+        XCTAssertFalse(out.contains("   "), "blank fragments are dropped")
+    }
+
+    func testUserContextOnlyWhenNoConnectors() async {
+        let agg = ContextAggregator(connectors: [])
+        let out = await agg.compose(userContext: "focus: taxes")
+        XCTAssertEqual(out, "focus: taxes")
+    }
+
+    func testEmptyWhenNothingToSay() async {
+        let agg = ContextAggregator(connectors: [Stub(value: nil)])
+        let out = await agg.compose(userContext: "  ")
+        XCTAssertTrue(out.isEmpty)
+    }
+}

@@ -70,7 +70,7 @@ struct TimeContextProvider {
 
     /// The ambient line for `now`, or nil if access isn't granted / nothing to say.
     func currentLine(now: Date = Date(), calendar: Calendar = .current) async -> String? {
-        guard await hasAccess() else { return nil }
+        guard hasAccess else { return nil }
         let startOfDay = calendar.startOfDay(for: now)
         guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay),
               endOfDay > now else { return nil }
@@ -84,14 +84,17 @@ struct TimeContextProvider {
         return TimeContext.contextLine(freeSeconds: free, nextEvent: next, calendar: calendar)
     }
 
-    private func hasAccess() async -> Bool {
-        switch EKEventStore.authorizationStatus(for: .event) {
-        case .fullAccess:
-            return true
-        case .notDetermined:
-            return (try? await store.requestFullAccessToEvents()) ?? false
-        default:
-            return false
-        }
+    /// True only if the user has ALREADY granted calendar access. Never prompts —
+    /// requesting access is a deliberate opt-in (`requestAccess`), so wiring this
+    /// connector into the ranker can't surface a permission dialog on launch.
+    var hasAccess: Bool { EKEventStore.authorizationStatus(for: .event) == .fullAccess }
+
+    /// Explicitly request calendar access — call from a user opt-in, never from ranking.
+    func requestAccess() async -> Bool {
+        (try? await store.requestFullAccessToEvents()) ?? false
     }
+}
+
+extension TimeContextProvider: ContextConnector {
+    func fragment() async -> String? { await currentLine() }
 }

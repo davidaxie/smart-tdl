@@ -172,3 +172,32 @@ enum Keychain {
         SecItemDelete(query as CFDictionary)
     }
 }
+
+// MARK: - Context connectors ("connect everything" — PRD §7.5)
+
+/// A source of ambient context for the ranker. Connectors are INPUTS (calendar,
+/// later Gmail, etc.); the auto-sort is the only OUTPUT — they never add UI. Each
+/// returns a short prose fragment, or nil when it has nothing to say (or no access).
+protocol ContextConnector {
+    func fragment() async -> String?
+}
+
+/// Composes the ranker's effective context: the user's own note first, then every
+/// connector's fragment. Pure string composition (blank fragments dropped) — this is
+/// the single seam that absorbs unlimited context without touching the ranking path.
+struct ContextAggregator {
+    let connectors: [ContextConnector]
+
+    func compose(userContext: String) async -> String {
+        var parts: [String] = []
+        let user = userContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !user.isEmpty { parts.append(user) }
+        for connector in connectors {
+            if let raw = await connector.fragment() {
+                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { parts.append(trimmed) }
+            }
+        }
+        return parts.joined(separator: "\n")
+    }
+}
