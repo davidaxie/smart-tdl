@@ -467,3 +467,243 @@ final class ContextAggregatorTests: XCTestCase {
         XCTAssertTrue(out.isEmpty)
     }
 }
+
+// MARK: - Daily ritual notifier: fire-time scheduling + guilt-free copy (PRD §7.6)
+// The one nudge a day. These cover the pure core — when it fires and what it says —
+// independent of UNUserNotificationCenter (which only runs once the user authorizes).
+
+final class DailyRitualTests: XCTestCase {
+    private let cal: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "America/New_York")!
+        return c
+    }()
+
+    private func date(_ y: Int, _ m: Int, _ d: Int, _ h: Int, _ min: Int) -> Date {
+        cal.date(from: DateComponents(year: y, month: m, day: d, hour: h, minute: min))!
+    }
+
+    func testFireRollsToTomorrowWhenTimeHasPassed() {
+        let now = date(2026, 6, 30, 10, 0)                                // 10:00, past 08:00
+        let preferred = DailyRitual.dailyComponents(hour: 8, minute: 0)
+        let fire = DailyRitual.nextFireDate(preferred: preferred, after: now, calendar: cal)
+        let c = cal.dateComponents([.month, .day, .hour, .minute], from: fire!)
+        XCTAssertEqual(c.month, 7); XCTAssertEqual(c.day, 1)             // next day
+        XCTAssertEqual(c.hour, 8);  XCTAssertEqual(c.minute, 0)
+    }
+
+    func testFireStaysTodayWhenTimeIsStillAhead() {
+        let now = date(2026, 6, 30, 10, 0)                                // 10:00, before 20:30
+        let preferred = DailyRitual.dailyComponents(hour: 20, minute: 30)
+        let fire = DailyRitual.nextFireDate(preferred: preferred, after: now, calendar: cal)
+        let c = cal.dateComponents([.day, .hour, .minute], from: fire!)
+        XCTAssertEqual(c.day, 30); XCTAssertEqual(c.hour, 20); XCTAssertEqual(c.minute, 30)
+    }
+
+    func testFireIsStrictlyAfterNow() {
+        let now = date(2026, 6, 30, 8, 0)                                 // exactly 08:00
+        let preferred = DailyRitual.dailyComponents(hour: 8, minute: 0)
+        let fire = DailyRitual.nextFireDate(preferred: preferred, after: now, calendar: cal)!
+        XCTAssertGreaterThan(fire, now, "never schedules into the present instant or past")
+    }
+
+    func testBodyZeroIsOpenSpaceNotFailure() {
+        let body = DailyRitual.body(openCount: 0, topTitle: "ignored when empty")
+        XCTAssertTrue(body.lowercased().contains("clear day"), "zero reads as space, not guilt")
+    }
+
+    func testBodyOneLeadsWithTheTask() {
+        XCTAssertEqual(DailyRitual.body(openCount: 1, topTitle: "Pay rent"),
+                       "One thing today: Pay rent.")
+    }
+
+    func testBodyManyLeadsWithTopTask() {
+        XCTAssertEqual(DailyRitual.body(openCount: 7, topTitle: "Pay rent"),
+                       "Today starts with: Pay rent.")
+    }
+
+    func testBodyNeverShowsARawCount() {
+        // The badge problem, inverted: a morning nudge must never surface "7 things".
+        XCTAssertFalse(DailyRitual.body(openCount: 7, topTitle: "Pay rent").contains("7"))
+    }
+
+    func testRescheduleIdentifierIsStable() {
+        // One identifier ⇒ a reschedule overwrites the pending nudge rather than stacking.
+        XCTAssertEqual(DailyRitual.requestIdentifier, "smarttdl.dailyRitual")
+    }
+}
+
+// MARK: - Sync mirroring: the outbound delta TaskStore hands the SyncCoordinator
+// (sync-plan.md §5). The CKSyncEngine itself needs a live container to run, but the
+// local→cloud delta computation and the P5 echo-suppression are pure and tested here.
+
+@MainActor
+final class SyncMirrorTests: XCTestCase {
+    /// Captures everything the store would push upward.
+    final class Sink: LocalChangeSink {
+        var upserts: [UUID] = []
+        var deletions: [UUID] = []
+        func localStoreDidChange(upserts: [UUID], deletions: [UUID]) {
+            self.upserts.append(contentsOf: upserts)
+            self.deletions.append(contentsOf: deletions)
+        }
+    }
+
+    private func task(_ title: String) -> TodoItem { TodoItem(title: title, day: Date(), sortIndex: 1) }
+
+    func testAttachPushesEveryCurrentTask() {
+        let a = task("a"), b = task("b")
+        let store = TaskStore(testItems: [a, b])
+        let sink = Sink()
+        store.attachSync(sink)
+        XCTAssertEqual(Set(sink.upserts), Set([a.id, b.id]), "initial attach pushes the whole store")
+    }
+
+    func testAddEmitsAnUpsert() {
+        let store = TaskStore(testItems: [])
+        let sink = Sink(); store.attachSync(sink); sink.upserts.removeAll()
+        store.add("new task", to: Date())
+        XCTAssertEqual(sink.upserts.count, 1)
+    }
+
+    func testImportanceCommitNeverSyncs() {
+        let a = task("a")
+        let store = TaskStore(testItems: [a])
+        let sink = Sink(); store.attachSync(sink); sink.upserts.removeAll()
+        store._testSetPendingScores([a.id: 0.9])
+        store.commitPendingRank()
+        XCTAssertTrue(sink.upserts.isEmpty, "importance is local-only — it never advances modifiedAt, so it never syncs")
+    }
+
+    func testDeleteEmitsADeletion() {
+        let a = task("a")
+        let store = TaskStore(testItems: [a])
+        let sink = Sink(); store.attachSync(sink); sink.upserts.removeAll()
+        store.delete(a)
+        XCTAssertEqual(sink.deletions, [a.id])
+    }
+
+    func testRemoteChangeIsNotEchoedBack() {
+        // A change that just arrived FROM the cloud must not bounce straight back to it.
+        let a = task("a")
+        let store = TaskStore(testItems: [a])
+        let sink = Sink(); store.attachSync(sink)
+        sink.upserts.removeAll(); sink.deletions.removeAll()
+
+        var remote = a
+        remote.title = "edited on another device"
+        remote.modifiedAt = a.modifiedAt.addingTimeInterval(100)   // newer ⇒ wins LWW
+        store.applyRemoteChanges(upserts: [remote])
+
+        XCTAssertTrue(sink.upserts.isEmpty && sink.deletions.isEmpty,
+                      "the just-applied remote edit is suppressed from the next outbound emit (no echo)")
+    }
+}
+
+// MARK: - Gmail connector: inbox → one quiet ranker line (PRD §7.5)
+// The OAuth read isn't wired, but the prose composition and the connector seam are.
+
+final class GmailConnectorTests: XCTestCase {
+    private struct StubInbox: InboxReading {
+        let snap: InboxSnapshot?
+        func snapshot() async -> InboxSnapshot? { snap }
+    }
+
+    func testNothingToSayWhenInboxIsQuiet() {
+        XCTAssertNil(GmailConnector.line(for: InboxSnapshot(awaitingReply: 0, highlight: nil)))
+    }
+
+    func testSingleReplyLine() {
+        XCTAssertEqual(GmailConnector.line(for: InboxSnapshot(awaitingReply: 1, highlight: nil)),
+                       "One email is waiting on a reply.")
+    }
+
+    func testManyRepliesLine() {
+        XCTAssertEqual(GmailConnector.line(for: InboxSnapshot(awaitingReply: 3, highlight: nil)),
+                       "3 emails are waiting on a reply.")
+    }
+
+    func testHighlightOnlyLine() {
+        XCTAssertEqual(GmailConnector.line(for: InboxSnapshot(awaitingReply: 0, highlight: "the lease")),
+                       "An email about the lease may need attention.")
+    }
+
+    func testCountWithHighlightLine() {
+        XCTAssertEqual(
+            GmailConnector.line(for: InboxSnapshot(awaitingReply: 2, highlight: "Dana about the contract")),
+            "2 emails are waiting on a reply, including Dana about the contract.")
+    }
+
+    func testConnectorComposesFromReader() async {
+        let connector = GmailConnector(reader: StubInbox(snap: InboxSnapshot(awaitingReply: 1, highlight: nil)))
+        let out = await connector.fragment()
+        XCTAssertEqual(out, "One email is waiting on a reply.")
+    }
+
+    func testConnectorSilentWhenReaderUnavailable() async {
+        let connector = GmailConnector(reader: StubInbox(snap: nil))
+        let out = await connector.fragment()
+        XCTAssertNil(out, "no account / no access ⇒ the connector says nothing")
+    }
+
+    func testProductionInboxIsInertUntilOAuth() async {
+        // GmailInbox returns nil until OAuth is configured — the app stays unaffected.
+        let out = await GmailInbox().snapshot()
+        XCTAssertNil(out)
+    }
+}
+
+// MARK: - Capture inbox: share-extension/widget hand-off → tasks (capture anywhere)
+// The App Group is account-gated, so tests inject a throwaway suite — the queue and the
+// drain-into-today logic are exercised exactly as they'll run with the real group.
+
+final class CaptureInboxTests: XCTestCase {
+    private func freshInbox() -> (CaptureInbox, UserDefaults, String) {
+        let name = "smarttdl.test.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        return (CaptureInbox(defaults: defaults), defaults, name)
+    }
+
+    func testEnqueueThenDrainRoundTripsInOrder() {
+        let (inbox, defaults, name) = freshInbox()
+        defer { defaults.removePersistentDomain(forName: name) }
+        inbox.enqueue("Buy milk")
+        inbox.enqueue("Call Sam")
+        XCTAssertEqual(inbox.pendingCount, 2)
+        XCTAssertEqual(inbox.drain(), ["Buy milk", "Call Sam"])
+        XCTAssertEqual(inbox.pendingCount, 0, "drain empties the queue")
+    }
+
+    func testEnqueueIgnoresBlanks() {
+        let (inbox, defaults, name) = freshInbox()
+        defer { defaults.removePersistentDomain(forName: name) }
+        inbox.enqueue("   ")
+        inbox.enqueue("")
+        XCTAssertEqual(inbox.pendingCount, 0)
+    }
+
+    @MainActor
+    func testDrainCapturesBecomeTodaysTasks() {
+        let (inbox, defaults, name) = freshInbox()
+        defer { defaults.removePersistentDomain(forName: name) }
+        inbox.enqueue("Buy milk")
+        inbox.enqueue("Email the landlord")
+
+        let store = TaskStore(testItems: [])
+        let created = store.drainCaptures(from: inbox)
+
+        XCTAssertEqual(created, 2)
+        let today = Calendar.current.startOfDay(for: Date())
+        let titles = Set(store.openTasks(on: today).map(\.title))
+        XCTAssertEqual(titles, ["Buy milk", "Email the landlord"])
+        XCTAssertEqual(inbox.pendingCount, 0, "captures are consumed, not duplicated on next launch")
+    }
+
+    @MainActor
+    func testDrainIsANoOpWhenEmpty() {
+        let (inbox, defaults, name) = freshInbox()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let store = TaskStore(testItems: [])
+        XCTAssertEqual(store.drainCaptures(from: inbox), 0)
+    }
+}

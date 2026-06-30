@@ -1,6 +1,14 @@
 import Foundation
 import Observation
 
+/// A sink for local content changes so a sync layer can mirror them upward. Pure
+/// Foundation (ids only, no CloudKit) — defined here, conformed to by the CloudKit
+/// `SyncCoordinator`. A nil `syncSink` means no sync is active and the store behaves
+/// exactly as it always has.
+protocol LocalChangeSink: AnyObject {
+    func localStoreDidChange(upserts: [UUID], deletions: [UUID])
+}
+
 /// Single source of truth. Day-bucketed tasks, JSON persistence, and an
 /// invisible auto-sort powered by a pluggable `Ranker`. New importance scores
 /// are buffered and only applied at "safe moments" so the list never reshuffles
@@ -35,6 +43,11 @@ final class TaskStore {
     private var pendingRemoteUpserts: [UUID: TodoItem] = [:]
     private var pendingRemoteDeletes: Set<UUID> = []
     private var undoStack: [UndoStep] = []
+
+    // Sync mirroring (inert until a SyncCoordinator attaches; see LocalChangeSink).
+    @ObservationIgnored weak var syncSink: (any LocalChangeSink)?
+    @ObservationIgnored private var syncSnapshot: [UUID: Date] = [:]   // id → last-emitted modifiedAt
+    @ObservationIgnored private var syncSuppress: Set<UUID> = []       // ids changed by remote — don't echo back
 
     private enum UndoStep {
         case toggle(UUID, Bool, UUID?)   // id, previous-completed, spawned-recurrence id
@@ -343,6 +356,7 @@ final class TaskStore {
         guard interacting.isEmpty,
               !pendingRemoteUpserts.isEmpty || !pendingRemoteDeletes.isEmpty else { return }
         var changed = false
+        var appliedRemotely: Set<UUID> = []   // suppress these from the next outbound sync emit
         for (id, remote) in pendingRemoteUpserts {
             if let i = items.firstIndex(where: { $0.id == id }) {
                 guard remote.modifiedAt > items[i].modifiedAt else { continue }   // LWW
@@ -350,18 +364,62 @@ final class TaskStore {
                 items[i] = remote
                 items[i].importance = localImportance
                 changed = true
+                appliedRemotely.insert(id)
             } else {
                 items.append(remote)   // a new task from another device; this device ranks it
                 changed = true
+                appliedRemotely.insert(id)
             }
         }
         for id in pendingRemoteDeletes where items.contains(where: { $0.id == id }) {
             items.removeAll { $0.id == id }
             changed = true
+            appliedRemotely.insert(id)
         }
         pendingRemoteUpserts.removeAll()
         pendingRemoteDeletes.removeAll()
-        if changed { save(); scheduleRank() }
+        if changed { syncSuppress = appliedRemotely; save(); scheduleRank() }
+    }
+
+    // MARK: - Sync mirroring (outbound delta; inert until a sink attaches)
+
+    /// Attach the sync layer. Resets the snapshot so the next emit flags every current
+    /// task as an upsert — the initial push of local data into the empty cloud zone.
+    func attachSync(_ sink: any LocalChangeSink) {
+        syncSink = sink
+        syncSnapshot = [:]
+        emitSyncDelta()
+    }
+
+    /// Re-push the entire local store (e.g. after an iCloud sign-in). Same mechanism as
+    /// a fresh attach: clear the snapshot, then emit all as upserts.
+    func resyncAll() {
+        guard syncSink != nil else { return }
+        syncSnapshot = [:]
+        emitSyncDelta()
+    }
+
+    /// Compute the id-level delta since the last emit and hand it to the sink. Cheap
+    /// O(n) and a no-op when no sink is attached. Importance-only saves don't advance
+    /// `modifiedAt`, so they never produce a delta — importance stays local (sync-plan
+    /// §3). Ids the remote layer just applied are skipped once, to avoid echoing a
+    /// just-received change straight back to the cloud.
+    private func emitSyncDelta() {
+        guard let sink = syncSink else { return }
+        var current: [UUID: Date] = [:]
+        var upserts: [UUID] = []
+        for item in items {
+            current[item.id] = item.modifiedAt
+            if syncSnapshot[item.id] != item.modifiedAt, !syncSuppress.contains(item.id) {
+                upserts.append(item.id)
+            }
+        }
+        let deletions = syncSnapshot.keys.filter { current[$0] == nil && !syncSuppress.contains($0) }
+        syncSnapshot = current
+        syncSuppress.removeAll()
+        if !upserts.isEmpty || !deletions.isEmpty {
+            sink.localStoreDidChange(upserts: upserts, deletions: Array(deletions))
+        }
     }
 
     /// Resolve which ranker to use. The Keychain read can surface a blocking
@@ -401,7 +459,10 @@ final class TaskStore {
     /// (the calendar time-layer today; Gmail/etc. later). Lazy so unit tests that
     /// never rerank don't spin up EventKit. Connectors stay inert until the user
     /// opts in, so this never prompts for access on its own.
-    @ObservationIgnored private lazy var contextAggregator = ContextAggregator(connectors: [TimeContextProvider()])
+    @ObservationIgnored private lazy var contextAggregator = ContextAggregator(connectors: [
+        TimeContextProvider(),                      // calendar — live once access is granted
+        GmailConnector(reader: GmailInbox()),       // email — silent until OAuth is configured
+    ])
 
     private func rerank() async {
         let visible = Set(visibleDays)
@@ -423,11 +484,51 @@ final class TaskStore {
         }
     }
 
+    // MARK: - Capture inbox (drain share-extension / widget captures into today)
+
+    /// Pull anything queued by a capture surface (Share Extension, widget) into today's
+    /// list, in capture order. Called on app activation. A no-op when the queue is empty
+    /// (the common case), so it's cheap to call on every foreground. Returns the count.
+    @discardableResult
+    func drainCaptures(from inbox: CaptureInbox = CaptureInbox()) -> Int {
+        let captured = inbox.drain()
+        guard !captured.isEmpty else { return 0 }
+        let today = calendar.startOfDay(for: Date())
+        for text in captured { add(text, to: today) }
+        return captured.count
+    }
+
+    // MARK: - Daily ritual notification (opt-in; no-op until the user authorizes)
+
+    /// The inputs the ritual copy needs, drawn from *today's* list: how many open
+    /// day-tasks remain and the single most important one (today's #1). The ritual is a
+    /// morning glance at today, so it deliberately ignores the rest of the week.
+    var ritualSnapshot: (openCount: Int, topTitle: String?) {
+        let open = openTasks(on: calendar.startOfDay(for: Date()))
+        return (open.count, open.first?.title)
+    }
+
+    #if canImport(UserNotifications)
+    /// (Re)schedule the daily ritual at the user's chosen time, drawing copy from the
+    /// current list. A no-op unless notifications are already authorized, so it's safe
+    /// to call on launch or after edits without surfacing a prompt. The Settings opt-in
+    /// (which calls `Notifier.requestAccess()` first) is the single activation point.
+    func refreshDailyRitual(hour: Int, minute: Int, notifier: Notifier = Notifier()) {
+        let snapshot = ritualSnapshot
+        let preferred = DailyRitual.dailyComponents(hour: hour, minute: minute)
+        Task {
+            await notifier.scheduleDailyRitual(
+                preferred: preferred, openCount: snapshot.openCount, topTitle: snapshot.topTitle)
+        }
+    }
+    #endif
+
     // MARK: - Persistence
 
     private func save() {
         guard let data = try? JSONEncoder().encode(items) else { return }
         try? data.write(to: saveURL, options: .atomic)
+        emitSyncDelta()   // mirror the change upward if a sync layer is attached (else no-op)
     }
 
     private func load() {

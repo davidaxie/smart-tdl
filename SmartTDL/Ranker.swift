@@ -201,3 +201,63 @@ struct ContextAggregator {
         return parts.joined(separator: "\n")
     }
 }
+
+// MARK: - Gmail connector (PRD §7.5 — email as a context input)
+
+/// A minimal, provider-agnostic view of what the inbox contributes to ranking context.
+/// Deliberately tiny: connectors are *inputs* to the sort, never inbox UI, so we only
+/// surface the couple of signals that change what matters next.
+struct InboxSnapshot: Sendable, Equatable {
+    /// Roughly how many messages look like they're waiting on the user to reply.
+    var awaitingReply: Int
+    /// A salient sender/subject worth naming, if any (e.g. "Dana about the contract").
+    var highlight: String?
+}
+
+/// Anything that can read an `InboxSnapshot`. Returns nil when unavailable — no account,
+/// no access, or offline — so the connector simply stays quiet.
+protocol InboxReading: Sendable {
+    func snapshot() async -> InboxSnapshot?
+}
+
+/// Turns inbox state into one quiet prose line for the ranker. The reader is injected so
+/// the prose composition is unit-testable today; the production reader (`GmailInbox`) is
+/// inert until OAuth is configured, so this connector contributes nothing until then —
+/// exactly like the calendar connector before access is granted.
+struct GmailConnector: ContextConnector {
+    let reader: InboxReading
+
+    func fragment() async -> String? {
+        guard let snapshot = await reader.snapshot() else { return nil }
+        return Self.line(for: snapshot)
+    }
+
+    /// Pure prose composition — nil when there's nothing worth saying. No raw inbox
+    /// counts as pressure beyond the gentle "waiting on a reply" framing.
+    static func line(for snapshot: InboxSnapshot) -> String? {
+        guard snapshot.awaitingReply > 0 || snapshot.highlight != nil else { return nil }
+        var parts: [String] = []
+        switch snapshot.awaitingReply {
+        case 0:        break
+        case 1:        parts.append("One email is waiting on a reply")
+        case let n:    parts.append("\(n) emails are waiting on a reply")
+        }
+        if let highlight = snapshot.highlight {
+            parts.append(parts.isEmpty ? "An email about \(highlight) may need attention"
+                                       : "including \(highlight)")
+        }
+        return parts.joined(separator: ", ") + "."
+    }
+}
+
+/// The production inbox source. INACTIVE until Gmail OAuth is configured: it returns nil,
+/// so `GmailConnector` says nothing and the app is unaffected. To activate, supply a
+/// Google Cloud OAuth client (id + secret + redirect), authenticate, and replace the
+/// body with a Gmail API read that maps inbox threads → `InboxSnapshot`.
+struct GmailInbox: InboxReading {
+    func snapshot() async -> InboxSnapshot? {
+        // TODO(oauth): authenticate via Google OAuth; query the Gmail API for inbox
+        // threads awaiting reply; map to InboxSnapshot. Silent until then.
+        nil
+    }
+}

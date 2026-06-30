@@ -18,6 +18,9 @@
 		BF0000000000000000000013 /* DateParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000013 /* DateParser.swift */; };
 		BF0000000000000000000008 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000008 /* Theme.swift */; };
 		BF0000000000000000000015 /* TimeContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000015 /* TimeContext.swift */; };
+		BF0000000000000000000016 /* Notifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000016 /* Notifier.swift */; };
+		BF0000000000000000000017 /* SyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000017 /* SyncCoordinator.swift */; };
+		BF0000000000000000000018 /* CaptureInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000018 /* CaptureInbox.swift */; };
 		BF0000000000000000000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000009 /* Assets.xcassets */; };
 		BF0000000000000000000014 /* PlayfairDisplay.ttf in Resources */ = {isa = PBXBuildFile; fileRef = FA0000000000000000000014 /* PlayfairDisplay.ttf */; };
 		BF00000000000000000000A1 /* SmartTDLTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA00000000000000000000A1 /* SmartTDLTests.swift */; };
@@ -45,6 +48,9 @@
 		FA0000000000000000000013 /* DateParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateParser.swift; sourceTree = "<group>"; };
 		FA0000000000000000000008 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		FA0000000000000000000015 /* TimeContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeContext.swift; sourceTree = "<group>"; };
+		FA0000000000000000000016 /* Notifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Notifier.swift; sourceTree = "<group>"; };
+		FA0000000000000000000017 /* SyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncCoordinator.swift; sourceTree = "<group>"; };
+		FA0000000000000000000018 /* CaptureInbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureInbox.swift; sourceTree = "<group>"; };
 		FA0000000000000000000009 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		FA0000000000000000000014 /* PlayfairDisplay.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = PlayfairDisplay.ttf; sourceTree = "<group>"; };
 		FA0000000000000000000010 /* SmartTDL.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SmartTDL.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -93,6 +99,9 @@
 				FA0000000000000000000003 /* TodoItem.swift */,
 				FA0000000000000000000008 /* Theme.swift */,
 				FA0000000000000000000015 /* TimeContext.swift */,
+				FA0000000000000000000016 /* Notifier.swift */,
+				FA0000000000000000000017 /* SyncCoordinator.swift */,
+				FA0000000000000000000018 /* CaptureInbox.swift */,
 				FA0000000000000000000009 /* Assets.xcassets */,
 				FA0000000000000000000014 /* PlayfairDisplay.ttf */,
 			);
@@ -219,6 +228,9 @@
 				BF0000000000000000000003 /* TodoItem.swift in Sources */,
 				BF0000000000000000000008 /* Theme.swift in Sources */,
 				BF0000000000000000000015 /* TimeContext.swift in Sources */,
+				BF0000000000000000000016 /* Notifier.swift in Sources */,
+				BF0000000000000000000017 /* SyncCoordinator.swift in Sources */,
+				BF0000000000000000000018 /* CaptureInbox.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -375,6 +387,8 @@
 				"INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad[sdk=iphonesimulator*]" = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				"INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone[sdk=iphoneos*]" = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				"INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone[sdk=iphonesimulator*]" = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Smart TDL reads today's calendar to learn how much free time you have left, so it can quietly sort your tasks. Nothing is shared and no time-block grid is ever shown.";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "Smart TDL reads today's calendar to learn how much free time you have left, so it can quietly sort your tasks.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				"LD_RUNPATH_SEARCH_PATHS[sdk=iphoneos*]" = "@executable_path/Frameworks";
@@ -412,6 +426,8 @@
 				"INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad[sdk=iphonesimulator*]" = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				"INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone[sdk=iphoneos*]" = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				"INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone[sdk=iphonesimulator*]" = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Smart TDL reads today's calendar to learn how much free time you have left, so it can quietly sort your tasks. Nothing is shared and no time-block grid is ever shown.";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "Smart TDL reads today's calendar to learn how much free time you have left, so it can quietly sort your tasks.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				"LD_RUNPATH_SEARCH_PATHS[sdk=iphoneos*]" = "@executable_path/Frameworks";

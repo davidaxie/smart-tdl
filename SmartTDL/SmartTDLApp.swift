@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct SmartTDLApp: App {
     @State private var store = TaskStore()
+    @Environment(\.scenePhase) private var scenePhase
 
     init() { Typeface.register() }
 
@@ -10,6 +11,10 @@ struct SmartTDLApp: App {
         WindowGroup {
             ContentView()
                 .environment(store)
+                .onAppear { store.drainCaptures() }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active { store.drainCaptures() }   // captured while backgrounded
+                }
         }
         #if os(macOS)
         .defaultSize(width: 920, height: 820)
